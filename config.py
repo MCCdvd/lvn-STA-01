@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
