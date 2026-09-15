@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -23,6 +24,14 @@ class PositionState:
     pnl_euro: float
     tp1_hit: bool = False
     current_stop: float = 0.0
+
+
+def _execution_price(next_row: pd.Series) -> float:
+    if "Open" in next_row.index:
+        open_price = pd.to_numeric(next_row["Open"], errors="coerce")
+        if pd.notna(open_price) and float(open_price) > 0:
+            return float(open_price)
+    return float(next_row["Close"])
 
 
 def _open_position(ticker: str, signal: str, date_str: str, price: float, investimento_per_trade: float, commissione_apertura: float) -> Optional[PositionState]:
@@ -58,6 +67,7 @@ def _close_trade(position: PositionState, exit_date: str, exit_price: float, exi
         "entry_date": position.entry_date,
         "exit_date": exit_date,
         "entry_price": round(position.entry_price, 4),
+        "entry_notional": round(position.entry_price * position.initial_quantity, 2),
         "exit_price": round(float(exit_price), 4),
         "quantity": int(position.initial_quantity),
         "realized_pnl": round(float(realized_pnl), 2),
@@ -66,72 +76,126 @@ def _close_trade(position: PositionState, exit_date: str, exit_price: float, exi
     }
 
 
-def _update_position(position: PositionState, df: pd.DataFrame, idx: int, date_str: str, current_price: float, params: StrategyParams, commissione_chiusura: float) -> Optional[Dict]:
+def _update_position(
+    position: PositionState,
+    df: pd.DataFrame,
+    idx: int,
+    signal_price: float,
+    execution_date_str: str,
+    execution_price: float,
+    params: StrategyParams,
+    commissione_chiusura: float,
+) -> Optional[Dict]:
     if not position.tp1_hit:
-        if position.direction == "LONG" and current_price <= position.entry_price * 0.97:
-            return _close_trade(position, date_str, current_price, "Hard stop exit", commissione_chiusura)
-        if position.direction == "SHORT" and current_price >= position.entry_price * 1.03:
-            return _close_trade(position, date_str, current_price, "Hard stop exit", commissione_chiusura)
+        if position.direction == "LONG" and signal_price <= position.entry_price * 0.97:
+            return _close_trade(position, execution_date_str, execution_price, "Hard stop exit", commissione_chiusura)
+        if position.direction == "SHORT" and signal_price >= position.entry_price * 1.03:
+            return _close_trade(position, execution_date_str, execution_price, "Hard stop exit", commissione_chiusura)
 
         signal, _, _, _ = signal_for_index(df, idx, params)
         opposite_signal = "SHORT" if position.direction == "LONG" else "LONG"
         if signal == opposite_signal:
             half_qty = position.quantity // 2 or position.quantity
             closed_pnl = (
-                (current_price - position.entry_price) * half_qty
+                (execution_price - position.entry_price) * half_qty
                 if position.direction == "LONG"
-                else (position.entry_price - current_price) * half_qty
+                else (position.entry_price - execution_price) * half_qty
             )
             position.pnl_euro = position.pnl_euro + closed_pnl - float(commissione_chiusura)
             position.quantity -= half_qty
             position.tp1_hit = True
-            position.current_stop = current_price * 0.98 if position.direction == "LONG" else current_price * 1.02
+            position.current_stop = signal_price * 0.98 if position.direction == "LONG" else signal_price * 1.02
             if position.quantity <= 0:
-                return _close_trade(position, date_str, current_price, "Opposite LVN TP1 full close", 0.0)
+                return _close_trade(position, execution_date_str, execution_price, "Opposite LVN TP1 full close", 0.0)
     else:
         is_exit = False
         if position.direction == "LONG":
-            position.current_stop = max(position.current_stop, current_price * 0.98)
-            is_exit = current_price <= position.current_stop
+            position.current_stop = max(position.current_stop, signal_price * 0.98)
+            is_exit = signal_price <= position.current_stop
         else:
             if position.current_stop == 0.0:
-                position.current_stop = current_price * 1.02
-            position.current_stop = min(position.current_stop, current_price * 1.02)
-            is_exit = current_price >= position.current_stop
+                position.current_stop = signal_price * 1.02
+            position.current_stop = min(position.current_stop, signal_price * 1.02)
+            is_exit = signal_price >= position.current_stop
         if is_exit:
-            return _close_trade(position, date_str, current_price, "Trailing stop exit", commissione_chiusura)
+            return _close_trade(position, execution_date_str, execution_price, "Trailing stop exit", commissione_chiusura)
     return None
 
 
-def run_backtest_for_ticker(data_dir: str, ticker: str, params: StrategyParams, investimento_per_trade: float, commissione_apertura: float, commissione_chiusura: float) -> pd.DataFrame:
-    file_path = os.path.join(data_dir, f"{ticker}.csv")
-    df = safe_read_csv(file_path)
-    if df is None or len(df) < params.window_profile + 1:
-        return pd.DataFrame(columns=["ticker", "direction", "entry_date", "exit_date", "entry_price", "exit_price", "quantity", "realized_pnl", "return_pct", "exit_reason"])
+def run_backtest_df(
+    df: pd.DataFrame,
+    ticker: str,
+    params: StrategyParams,
+    investimento_per_trade: float,
+    commissione_apertura: float,
+    commissione_chiusura: float,
+) -> pd.DataFrame:
+    if df is None or df.empty or len(df) < params.window_profile + 2:
+        return pd.DataFrame(
+            columns=[
+                "ticker",
+                "direction",
+                "entry_date",
+                "exit_date",
+                "entry_price",
+                "entry_notional",
+                "exit_price",
+                "quantity",
+                "realized_pnl",
+                "return_pct",
+                "exit_reason",
+            ]
+        )
 
     trades: List[Dict] = []
     position: Optional[PositionState] = None
 
-    for idx in range(params.window_profile, len(df)):
+    for idx in range(params.window_profile, len(df) - 1):
         row = df.iloc[idx]
-        date_str = str(pd.to_datetime(row["Date"]).date())
+        next_row = df.iloc[idx + 1]
         close_price = float(row["Close"])
+        execution_date = str(pd.to_datetime(next_row["Date"]).date())
+        execution_price = _execution_price(next_row)
         signal, _, _, _ = signal_for_index(df, idx, params)
+        closed_this_step = False
 
         if position is not None:
-            closed_trade = _update_position(position, df, idx, date_str, close_price, params, commissione_chiusura)
+            closed_trade = _update_position(position, df, idx, close_price, execution_date, execution_price, params, commissione_chiusura)
             if closed_trade is not None:
                 trades.append(closed_trade)
                 position = None
+                closed_this_step = True
 
-        if position is None and signal in {"LONG", "SHORT"}:
-            position = _open_position(ticker, signal, date_str, close_price, investimento_per_trade, commissione_apertura)
+        if position is None and not closed_this_step and signal in {"LONG", "SHORT"}:
+            position = _open_position(ticker, signal, execution_date, execution_price, investimento_per_trade, commissione_apertura)
 
     if position is not None:
         last_row = df.iloc[-1]
         trades.append(_close_trade(position, str(pd.to_datetime(last_row["Date"]).date()), float(last_row["Close"]), "End of data", commissione_chiusura))
 
     return pd.DataFrame(trades)
+
+
+def run_backtest_for_ticker(data_dir: str, ticker: str, params: StrategyParams, investimento_per_trade: float, commissione_apertura: float, commissione_chiusura: float) -> pd.DataFrame:
+    file_path = os.path.join(data_dir, f"{ticker}.csv")
+    df = safe_read_csv(file_path)
+    if df is None:
+        return pd.DataFrame(
+            columns=[
+                "ticker",
+                "direction",
+                "entry_date",
+                "exit_date",
+                "entry_price",
+                "entry_notional",
+                "exit_price",
+                "quantity",
+                "realized_pnl",
+                "return_pct",
+                "exit_reason",
+            ]
+        )
+    return run_backtest_df(df, ticker, params, investimento_per_trade, commissione_apertura, commissione_chiusura)
 
 
 def _profit_factor(pnls: pd.Series) -> float:
@@ -157,10 +221,12 @@ def _max_drawdown(trades_df: pd.DataFrame) -> float:
     return round(abs(float((equity - equity.cummax()).min())), 2)
 
 
-def build_summaries(trades_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def build_summaries(trades_df: pd.DataFrame, initial_capital: Optional[float] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if trades_df.empty:
         summary_by_ticker = pd.DataFrame(columns=["ticker", "trade_count", "win_rate", "total_pnl", "avg_pnl_per_trade", "profit_factor", "max_drawdown"])
-        summary_global = pd.DataFrame([{"total_trades": 0, "total_pnl": 0.0, "overall_win_rate": 0.0, "profit_factor": 0.0, "max_drawdown": 0.0}])
+        summary_global = pd.DataFrame(
+            [{"total_trades": 0, "total_pnl": 0.0, "overall_win_rate": 0.0, "profit_factor": 0.0, "max_drawdown": 0.0, "max_drawdown_pct": 0.0}]
+        )
         return summary_by_ticker, summary_global
 
     rows: List[Dict] = []
@@ -181,6 +247,8 @@ def build_summaries(trades_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
     summary_by_ticker = pd.DataFrame(rows).sort_values("total_pnl", ascending=False).reset_index(drop=True)
     total_trades = int(len(trades_df))
     total_wins = int((trades_df["realized_pnl"] > 0).sum())
+    max_dd_abs = _max_drawdown(trades_df)
+    max_dd_pct = round((max_dd_abs / float(initial_capital)) * 100, 2) if initial_capital and initial_capital > 0 else 0.0
     summary_global = pd.DataFrame(
         [
             {
@@ -188,11 +256,44 @@ def build_summaries(trades_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
                 "total_pnl": round(float(trades_df["realized_pnl"].sum()), 2),
                 "overall_win_rate": round((total_wins / total_trades) * 100, 2) if total_trades else 0.0,
                 "profit_factor": _profit_factor(trades_df["realized_pnl"]),
-                "max_drawdown": _max_drawdown(trades_df),
+                "max_drawdown": max_dd_abs,
+                "max_drawdown_pct": max_dd_pct,
             }
         ]
     )
     return summary_by_ticker, summary_global
+
+
+def _git_commit_hash() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(__file__), text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+def _build_run_metadata(params: StrategyParams, ticker: str, data_dir: str, row_count: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "ticker": ticker,
+                "data_dir": os.path.abspath(data_dir),
+                "row_count": int(row_count),
+                "window_profile": params.window_profile,
+                "price_tolerance": params.price_tolerance,
+                "lvn_threshold": params.lvn_threshold,
+                "bin_step": params.bin_step,
+                "min_profile_levels": params.min_profile_levels,
+                "rsi_period": params.rsi_period,
+                "rsi_long_max": params.rsi_long_max,
+                "rsi_short_min": params.rsi_short_min,
+                "investimento_per_trade": CONFIG.strategy.investimento_per_trade,
+                "commissione_apertura": CONFIG.strategy.commissione_apertura,
+                "commissione_chiusura": CONFIG.strategy.commissione_chiusura,
+                "execution_model": "signal_on_close_execute_next_bar_open_or_close",
+                "git_commit": _git_commit_hash(),
+            }
+        ]
+    )
 
 
 def main() -> None:
@@ -228,6 +329,9 @@ def main() -> None:
     trades_df.to_csv(os.path.join(ticker_dir, "trades.csv"), index=False)
     summary_by_ticker_df.to_csv(os.path.join(ticker_dir, "summary_by_ticker.csv"), index=False)
     summary_global_df.to_csv(os.path.join(ticker_dir, "summary_global.csv"), index=False)
+    source_df = safe_read_csv(os.path.join(args.data_dir, f"{args.ticker}.csv"))
+    row_count = 0 if source_df is None else len(source_df)
+    _build_run_metadata(params, args.ticker, args.data_dir, row_count).to_csv(os.path.join(ticker_dir, "run_metadata.csv"), index=False)
     print(f"Output salvati in: {ticker_dir}")
 
 
