@@ -5,18 +5,19 @@ from pathlib import Path
 from typing import List
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    data_dir: str = str(REPO_ROOT / "data")
-    output_dir: str = str(REPO_ROOT / "database" / "single_ticker_analysis")
+    data_dir: str = str(REPO_ROOT)
+    output_dir: str = str(REPO_ROOT / "outputs" / "single_ticker_analysis")
 
 
 @dataclass(frozen=True)
 class StrategyConfig:
     investimento_per_trade: float = 10000.0
+    portfolio_initial_capital: float = 100000.0
     commissione_apertura: float = 10.0
     commissione_chiusura: float = 10.0
     window_profile: int = 25
@@ -34,6 +35,9 @@ class GridConfig:
     window_profiles: List[int] = field(default_factory=lambda: [12, 15, 18, 20])
     price_tolerances: List[float] = field(default_factory=lambda: [0.15, 0.18, 0.20, 0.22, 0.25])
     lvn_thresholds: List[float] = field(default_factory=lambda: [0.25, 0.30, 0.35, 0.40])
+    train_ratio: float = 0.60
+    validation_ratio: float = 0.20
+    test_ratio: float = 0.20
     top_n: int = 20
 
 
