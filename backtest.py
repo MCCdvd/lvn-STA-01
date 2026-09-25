@@ -103,7 +103,15 @@ def _update_position(position: PositionState, df: pd.DataFrame, idx: int, date_s
     return None
 
 
-def run_backtest_for_ticker(data_dir: str, ticker: str, params: StrategyParams, investimento_per_trade: float, commissione_apertura: float, commissione_chiusura: float) -> pd.DataFrame:
+def run_backtest_for_ticker(
+    data_dir: str,
+    ticker: str,
+    params: StrategyParams,
+    investimento_per_trade: float,
+    commissione_apertura: float,
+    commissione_chiusura: float,
+    **_: object,
+) -> pd.DataFrame:
     file_path = os.path.join(data_dir, f"{ticker}.csv")
     df = safe_read_csv(file_path)
     if df is None or len(df) < params.window_profile + 1:
