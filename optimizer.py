@@ -46,8 +46,7 @@ def _run_global_with_shared_params(
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
         )
-        _, summary_global_df = build_summaries(trades)
-        summary_row = summary_global_df.iloc[0]
+        summary_row = _summary_row_for_trades(trades)
         processed_units += 1
         if progress_display is not None:
             progress_display.update(
@@ -80,6 +79,19 @@ def _save_baseline(output_dir: str, params: StrategyParams, trades_df: pd.DataFr
     return summary_global_df
 
 
+def _summary_row_for_trades(trades_df: pd.DataFrame) -> Dict[str, float]:
+    _, summary_global_df = build_summaries(trades_df)
+    if summary_global_df.empty:
+        return {
+            "total_trades": 0.0,
+            "total_pnl": 0.0,
+            "overall_win_rate": 0.0,
+            "profit_factor": 0.0,
+            "max_drawdown": 0.0,
+        }
+    return summary_global_df.iloc[0].to_dict()
+
+
 def _score_ticker_combos(
     data_dir: str,
     ticker: str,
@@ -107,8 +119,7 @@ def _score_ticker_combos(
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
         )
-        _, summary_global_df = build_summaries(trades_df)
-        metrics = summary_global_df.iloc[0].to_dict()
+        metrics = _summary_row_for_trades(trades_df)
         metrics.update(
             {
                 "ticker": ticker,
@@ -239,8 +250,7 @@ def main() -> None:
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
         )
         processed_units += 1
-        _, best_summary_global = build_summaries(best_trades)
-        best_summary_row = best_summary_global.iloc[0]
+        best_summary_row = _summary_row_for_trades(best_trades)
         progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
         progress_display.update(
             processed_units=processed_units,

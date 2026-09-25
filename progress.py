@@ -141,8 +141,7 @@ class ProgressDisplay:
             return "n/a"
         ordered = sorted(
             self.ticker_results.items(),
-            key=lambda item: (float(item[1]["total_pnl"]), item[0]),
-            reverse=best,
+            key=lambda item: ((-1 if best else 1) * float(item[1]["total_pnl"]), item[0]),
         )
         ticker, metrics = ordered[0]
         return f"{ticker} ({format_currency(metrics['total_pnl'])})"
