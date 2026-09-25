@@ -29,6 +29,8 @@ def _update_position(
         opposite_signal = "SHORT" if position.direction == "LONG" else "LONG"
         if signal == opposite_signal:
             half_qty = position.quantity // 2 or position.quantity
+            if half_qty >= position.quantity:
+                return close_trade(position, date_str, current_price, "Opposite LVN TP1 full close", commissione_chiusura)
             closed_pnl = (
                 (current_price - position.entry_price) * half_qty
                 if position.direction == "LONG"

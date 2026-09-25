@@ -57,6 +57,15 @@ def calmar_ratio(total_return: float, drawdown: float) -> float:
     return float(total_return / drawdown)
 
 
+def max_drawdown_pct(returns: pd.Series) -> float:
+    series = returns.dropna()
+    if series.empty:
+        return 0.0
+    equity = series.cumsum()
+    drawdown = equity - equity.cummax()
+    return abs(float(drawdown.min()))
+
+
 def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     if trades_df.empty:
         by_ticker = pd.DataFrame(columns=["ticker", "trade_count", "win_rate", "total_pnl", "avg_pnl_per_trade", "profit_factor", "max_drawdown", "sharpe", "sortino", "calmar"])
@@ -69,7 +78,9 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
         wins = int((grp["realized_pnl"] > 0).sum())
         returns = grp["return_pct"] / 100.0
         dd = max_drawdown(grp)
+        dd_pct = max_drawdown_pct(returns)
         total_pnl = float(grp["realized_pnl"].sum())
+        total_ret = float(returns.sum())
         rows.append(
             {
                 "ticker": ticker,
@@ -81,7 +92,7 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
                 "max_drawdown": dd,
                 "sharpe": round(sharpe_ratio(returns), 4),
                 "sortino": round(sortino_ratio(returns), 4),
-                "calmar": round(calmar_ratio(total_pnl, dd), 4),
+                "calmar": round(calmar_ratio(total_ret, dd_pct), 4),
             }
         )
 
@@ -90,6 +101,7 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
     total_wins = int((trades_df["realized_pnl"] > 0).sum())
     all_returns = trades_df["return_pct"] / 100.0
     global_dd = max_drawdown(trades_df)
+    global_dd_pct = max_drawdown_pct(all_returns)
     global_df = pd.DataFrame(
         [
             {
@@ -100,7 +112,7 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
                 "max_drawdown": global_dd,
                 "sharpe": round(sharpe_ratio(all_returns), 4),
                 "sortino": round(sortino_ratio(all_returns), 4),
-                "calmar": round(calmar_ratio(float(trades_df["realized_pnl"].sum()), global_dd), 4),
+                "calmar": round(calmar_ratio(float(all_returns.sum()), global_dd_pct), 4),
             }
         ]
     )

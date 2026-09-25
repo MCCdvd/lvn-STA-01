@@ -109,6 +109,8 @@ def run_grid_search(
             by=["profit_factor", "total_pnl", "max_drawdown", "trade_count"],
             ascending=[False, False, True, False],
         ).reset_index(drop=True)
+        if scored.empty:
+            continue
         ticker_dir = per_ticker_root / ticker
         ticker_dir.mkdir(parents=True, exist_ok=True)
         scored.to_csv(ticker_dir / "results.csv", index=False)
