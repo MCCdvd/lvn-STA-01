@@ -31,9 +31,10 @@ def run_walk_forward(
     start = 0
     while start + train_size + test_size <= len(df):
         chunk = df.iloc[start : start + train_size + test_size].copy()
+        test_chunk = chunk.iloc[train_size:].copy()
         with tempfile.TemporaryDirectory(prefix="lvn_wf_") as tmp_dir:
             temp_dir = Path(tmp_dir)
-            chunk.to_csv(temp_dir / f"{ticker}.csv", index=False)
+            test_chunk.to_csv(temp_dir / f"{ticker}.csv", index=False)
             trades = run_backtest_for_ticker(temp_dir, ticker, params, investimento_per_trade, commissione_apertura, commissione_chiusura)
         _, summary = summarize_trades(trades)
         row = summary.iloc[0].to_dict()

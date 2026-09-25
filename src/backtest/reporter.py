@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from pathlib import Path
 
@@ -18,10 +19,11 @@ def write_json_report(result: BacktestResult, output_file: Path) -> None:
 
 def write_html_report(result: BacktestResult, output_file: Path, title: str = "LVN Backtest Report") -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    html = f"""<!doctype html>
-<html><head><meta charset='utf-8'><title>{title}</title></head>
+    safe_title = html.escape(title)
+    report_html = f"""<!doctype html>
+<html><head><meta charset='utf-8'><title>{safe_title}</title></head>
 <body>
-  <h1>{title}</h1>
+  <h1>{safe_title}</h1>
   <h2>Global Summary</h2>
   {result.summary_global.to_html(index=False, escape=True)}
   <h2>Summary by Ticker</h2>
@@ -30,4 +32,4 @@ def write_html_report(result: BacktestResult, output_file: Path, title: str = "L
   {result.trades.head(100).to_html(index=False, escape=True)}
 </body></html>
 """
-    output_file.write_text(html, encoding="utf-8")
+    output_file.write_text(report_html, encoding="utf-8")
