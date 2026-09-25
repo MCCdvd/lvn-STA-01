@@ -139,14 +139,21 @@ def run_grid_search(
             best_trades_frames.append(best_trades)
 
     best_global_dir = output_dir / "per_ticker_best"
+    best_global_legacy_dir = output_dir / "per_ticker_best_global"
     best_global_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(best_params_rows).to_csv(best_global_dir / "params.csv", index=False)
+    best_global_legacy_dir.mkdir(parents=True, exist_ok=True)
+    best_params_df = pd.DataFrame(best_params_rows)
+    best_params_df.to_csv(best_global_dir / "params.csv", index=False)
+    best_params_df.to_csv(best_global_legacy_dir / "best_params_all_tickers.csv", index=False)
 
     per_ticker_best = pd.concat(best_trades_frames, ignore_index=True) if best_trades_frames else pd.DataFrame()
     per_ticker_best.to_csv(best_global_dir / "trades.csv", index=False)
+    per_ticker_best.to_csv(best_global_legacy_dir / "trades.csv", index=False)
     best_by_ticker, best_global = summarize_trades(per_ticker_best)
     best_by_ticker.to_csv(best_global_dir / "summary_by_ticker.csv", index=False)
     best_global.to_csv(best_global_dir / "summary_global.csv", index=False)
+    best_by_ticker.to_csv(best_global_legacy_dir / "summary_by_ticker.csv", index=False)
+    best_global.to_csv(best_global_legacy_dir / "summary_global.csv", index=False)
 
     comparison = pd.DataFrame(
         [

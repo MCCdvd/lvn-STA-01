@@ -47,7 +47,7 @@ def main() -> None:
     trades_df.to_csv(ticker_dir / "trades.csv", index=False)
     summary_by_ticker_df.to_csv(ticker_dir / "summary_by_ticker.csv", index=False)
     summary_global_df.to_csv(ticker_dir / "summary_global.csv", index=False)
-    print(f"Output salvati in: {ticker_dir}")
+    print(f"Output saved in: {ticker_dir}")
 
 
 if __name__ == "__main__":

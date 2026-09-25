@@ -132,7 +132,7 @@ def report(results_dir: str | None, summary_global: str | None, summary_by_ticke
     base = Path(results_dir) if results_dir else cfg.runtime.output_dir
     summary_global_path = Path(summary_global) if summary_global else base / "baseline_global" / "summary_global.csv"
     summary_by_ticker_path = Path(summary_by_ticker) if summary_by_ticker else base / "baseline_global" / "summary_by_ticker.csv"
-    if not summary_global_path.exists() or not summary_by_ticker_path.exists():
+    if (not summary_global_path.is_file()) or (not summary_by_ticker_path.is_file()):
         raise click.ClickException(
             "Missing summary files. Provide --summary-global and --summary-by-ticker, "
             "or run optimize so baseline summaries are created under results_dir/baseline_global."
