@@ -29,7 +29,8 @@ def _discover_tickers(data_dir: str) -> List[str]:
 
 def _run_global_with_shared_params(data_dir: str, tickers: List[str], params: StrategyParams) -> pd.DataFrame:
     all_trades: List[pd.DataFrame] = []
-    for ticker in tickers:
+    for index, ticker in enumerate(tickers, start=1):
+        print(f"[baseline] {index}/{len(tickers)} {ticker}", flush=True)
         trades = run_backtest_for_ticker(
             data_dir=data_dir,
             ticker=ticker,
@@ -58,7 +59,10 @@ def _save_baseline(output_dir: str, params: StrategyParams, trades_df: pd.DataFr
 
 def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.DataFrame:
     rows: List[Dict] = []
-    for window_profile, price_tolerance, lvn_threshold in combos:
+    total_combos = len(combos)
+    for combo_index, (window_profile, price_tolerance, lvn_threshold) in enumerate(combos, start=1):
+        if combo_index == 1 or combo_index == total_combos or combo_index % 10 == 0:
+            print(f"[grid] {ticker} combo {combo_index}/{total_combos}", flush=True)
         params = StrategyParams(
             window_profile=window_profile,
             price_tolerance=price_tolerance,
@@ -118,6 +122,10 @@ def main() -> None:
     if not combos:
         raise ValueError("Nessuna combinazione parametri disponibile")
 
+    print(
+        f"Avvio ottimizzazione per {len(tickers)} ticker con {len(combos)} combinazioni per ticker...",
+        flush=True,
+    )
     baseline_params = StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
         price_tolerance=CONFIG.strategy.price_tolerance,
@@ -130,6 +138,7 @@ def main() -> None:
     )
     baseline_trades = _run_global_with_shared_params(args.data_dir, tickers, baseline_params)
     baseline_global_df = _save_baseline(args.output_dir, baseline_params, baseline_trades)
+    print("Baseline completata.", flush=True)
 
     per_ticker_root = os.path.join(args.output_dir, "per_ticker")
     os.makedirs(per_ticker_root, exist_ok=True)
@@ -137,7 +146,8 @@ def main() -> None:
     best_params_rows: List[Dict] = []
     best_trades_frames: List[pd.DataFrame] = []
 
-    for ticker in tickers:
+    for ticker_index, ticker in enumerate(tickers, start=1):
+        print(f"[optimizer] ticker {ticker_index}/{len(tickers)}: {ticker}", flush=True)
         ticker_results = _score_ticker_combos(args.data_dir, ticker, combos)
         ticker_results = ticker_results.sort_values(
             by=["profit_factor", "total_pnl", "max_drawdown", "trade_count"],
@@ -173,6 +183,7 @@ def main() -> None:
         )
         if not best_trades.empty:
             best_trades_frames.append(best_trades)
+        print(f"[optimizer] completato {ticker}", flush=True)
 
     best_global_dir = os.path.join(args.output_dir, "per_ticker_best_global")
     os.makedirs(best_global_dir, exist_ok=True)

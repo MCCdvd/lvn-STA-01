@@ -213,6 +213,7 @@ def main() -> None:
         rsi_short_min=CONFIG.strategy.rsi_short_min,
     )
 
+    print(f"Avvio backtest per ticker {args.ticker}...", flush=True)
     trades_df = run_backtest_for_ticker(
         data_dir=args.data_dir,
         ticker=args.ticker,
