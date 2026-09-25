@@ -50,12 +50,15 @@ def _run_global_with_shared_params(
         )
         processed_units += 1
         if progress_display is not None:
+            baseline_metrics = _progress_metrics_for_trades(trades)
             if run_metadata.get("skipped"):
                 progress_display.record_skipped_ticker(ticker)
+            else:
+                progress_display.record_ticker_result(ticker, baseline_metrics.trades_found, baseline_metrics.total_pnl)
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,
-                metrics=_progress_metrics_for_trades(trades),
+                metrics=baseline_metrics,
                 context="Baseline shared parameters",
             )
         if not trades.empty:
@@ -148,6 +151,8 @@ def _score_ticker_combos(
         if progress_display is not None:
             if run_metadata.get("skipped"):
                 progress_display.record_skipped_ticker(ticker)
+            else:
+                progress_display.record_ticker_result(ticker, int(metrics["trade_count"]), float(metrics["total_pnl"]))
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,
@@ -272,7 +277,7 @@ def main() -> None:
         if progress_display is not None:
             if run_metadata.get("skipped"):
                 progress_display.record_skipped_ticker(ticker)
-            elif not progress_display.has_skipped_ticker(ticker):
+            else:
                 progress_display.record_ticker_result(ticker, int(best_summary_row["total_trades"]), float(best_summary_row["total_pnl"]))
             progress_display.update(
                 processed_units=processed_units,
