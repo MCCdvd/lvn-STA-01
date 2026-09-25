@@ -40,19 +40,24 @@ class PathValidationTests(unittest.TestCase):
         drive_path = r"C:\Users\tester\data"
         unc_backslash = r"\\server\share\data"
         unc_forward = "//server/share/data"
-        self.assertEqual(resolve_path(drive_path), os.path.normpath(drive_path))
-        self.assertEqual(resolve_path(unc_backslash), os.path.normpath(unc_backslash))
+        if os.name == "nt":
+            self.assertEqual(resolve_path(drive_path), os.path.normpath(drive_path))
+            self.assertEqual(resolve_path(unc_backslash), os.path.normpath(unc_backslash))
+        else:
+            self.assertEqual(resolve_path(drive_path), os.path.abspath(os.path.normpath(drive_path)))
+            self.assertEqual(resolve_path(unc_backslash), os.path.abspath(os.path.normpath(unc_backslash)))
         self.assertEqual(resolve_path(unc_forward), os.path.normpath(unc_forward))
 
     def test_resolve_directory_windows_absolute_must_exist_validation(self) -> None:
         drive_path = r"C:\Users\tester\data"
         normalized = os.path.normpath(drive_path)
-        with mock.patch("os.path.exists", return_value=True), mock.patch("os.path.isdir", return_value=True):
-            self.assertEqual(resolve_directory(drive_path, "--data-dir", must_exist=True), normalized)
+        with mock.patch("validators.os.name", "nt"):
+            with mock.patch("os.path.exists", return_value=True), mock.patch("os.path.isdir", return_value=True):
+                self.assertEqual(resolve_directory(drive_path, "--data-dir", must_exist=True), normalized)
 
-        with mock.patch("os.path.exists", return_value=False), mock.patch("os.path.isdir", return_value=False):
-            with self.assertRaises(PathValidationError):
-                resolve_directory(drive_path, "--data-dir", must_exist=True)
+            with mock.patch("os.path.exists", return_value=False), mock.patch("os.path.isdir", return_value=False):
+                with self.assertRaises(PathValidationError):
+                    resolve_directory(drive_path, "--data-dir", must_exist=True)
 
     def test_resolve_directory_rejects_conflicting_flags(self) -> None:
         with self.assertRaises(PathValidationError):
