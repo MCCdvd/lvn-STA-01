@@ -69,19 +69,19 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
         wins = int((grp["realized_pnl"] > 0).sum())
         returns = grp["return_pct"] / 100.0
         dd = max_drawdown(grp)
-        total_ret = float(returns.sum())
+        total_pnl = float(grp["realized_pnl"].sum())
         rows.append(
             {
                 "ticker": ticker,
                 "trade_count": count,
                 "win_rate": round((wins / count) * 100, 2) if count else 0.0,
-                "total_pnl": round(float(grp["realized_pnl"].sum()), 2),
+                "total_pnl": round(total_pnl, 2),
                 "avg_pnl_per_trade": round(float(grp["realized_pnl"].mean()), 2) if count else 0.0,
                 "profit_factor": profit_factor(grp["realized_pnl"]),
                 "max_drawdown": dd,
                 "sharpe": round(sharpe_ratio(returns), 4),
                 "sortino": round(sortino_ratio(returns), 4),
-                "calmar": round(calmar_ratio(total_ret, dd), 4),
+                "calmar": round(calmar_ratio(total_pnl, dd), 4),
             }
         )
 
@@ -100,7 +100,7 @@ def summarize_trades(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
                 "max_drawdown": global_dd,
                 "sharpe": round(sharpe_ratio(all_returns), 4),
                 "sortino": round(sortino_ratio(all_returns), 4),
-                "calmar": round(calmar_ratio(float(all_returns.sum()), global_dd), 4),
+                "calmar": round(calmar_ratio(float(trades_df["realized_pnl"].sum()), global_dd), 4),
             }
         ]
     )

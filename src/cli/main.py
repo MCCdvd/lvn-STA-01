@@ -24,7 +24,7 @@ for command in [
 
 @cli_error_handler
 def main() -> None:
-    cli(standalone_mode=True)
+    cli(standalone_mode=False)
 
 
 if __name__ == "__main__":

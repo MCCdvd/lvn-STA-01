@@ -7,6 +7,7 @@ import tempfile
 import pandas as pd
 
 from src.backtest.engine import run_backtest_for_ticker
+from src.data.loader import load_ticker_data
 from src.engine.metrics import summarize_trades
 from src.engine.signals import StrategyParams
 
@@ -26,7 +27,7 @@ def run_walk_forward(
     train_size: int = 252,
     test_size: int = 63,
 ) -> WalkForwardResult:
-    df = pd.read_csv(data_dir / f"{ticker}.csv")
+    df = load_ticker_data(data_dir, ticker)
     rows: list[dict[str, float | int | str]] = []
     start = 0
     while start + train_size + test_size <= len(df):

@@ -14,7 +14,7 @@ def write_json_report(result: BacktestResult, output_file: Path) -> None:
         "summary_by_ticker": result.summary_by_ticker.to_dict(orient="records"),
         "trades": result.trades.to_dict(orient="records"),
     }
-    output_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    output_file.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
 def write_html_report(result: BacktestResult, output_file: Path, title: str = "LVN Backtest Report") -> None:

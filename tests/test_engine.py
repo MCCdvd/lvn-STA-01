@@ -16,3 +16,7 @@ def test_summarize_trades_adds_advanced_metrics():
     assert "sharpe" in by_ticker.columns
     assert "sortino" in by_ticker.columns
     assert "calmar" in global_summary.columns
+    row = by_ticker.iloc[0]
+    assert row["total_pnl"] == 50.0
+    assert row["max_drawdown"] == 50.0
+    assert row["calmar"] == 1.0
