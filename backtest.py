@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from src.backtest.engine import run_backtest_for_ticker
-from src.config.settings import SETTINGS
+from src.config.settings import load_settings
 from src.engine.metrics import summarize_trades
 from src.engine.signals import StrategyParams
 
@@ -14,13 +14,14 @@ def build_summaries(trades_df):
 
 
 def main() -> None:
+    settings = load_settings()
     parser = argparse.ArgumentParser(description="Backtest single ticker analysis")
-    parser.add_argument("--data-dir", default=str(SETTINGS.runtime.data_dir))
+    parser.add_argument("--data-dir", default=str(settings.runtime.data_dir))
     parser.add_argument("--ticker", required=True)
-    parser.add_argument("--output-dir", default=str(SETTINGS.runtime.output_dir))
+    parser.add_argument("--output-dir", default=str(settings.runtime.output_dir))
     args = parser.parse_args()
 
-    cfg = SETTINGS.strategy
+    cfg = settings.strategy
     params = StrategyParams(
         window_profile=cfg.window_profile,
         price_tolerance=cfg.price_tolerance,

@@ -28,7 +28,18 @@ def _update_position(
         signal, _, _, _ = signal_for_index(df, idx, params)
         opposite_signal = "SHORT" if position.direction == "LONG" else "LONG"
         if signal == opposite_signal:
-            return close_trade(position, date_str, current_price, "Opposite LVN exit", commissione_chiusura)
+            half_qty = position.quantity // 2 or position.quantity
+            closed_pnl = (
+                (current_price - position.entry_price) * half_qty
+                if position.direction == "LONG"
+                else (position.entry_price - current_price) * half_qty
+            )
+            position.pnl_euro = position.pnl_euro + closed_pnl - float(commissione_chiusura)
+            position.quantity -= half_qty
+            position.tp1_hit = True
+            position.current_stop = current_price * 0.98 if position.direction == "LONG" else current_price * 1.02
+            if position.quantity <= 0:
+                return close_trade(position, date_str, current_price, "Opposite LVN TP1 full close", 0.0)
     else:
         if position.direction == "LONG":
             position.current_stop = max(position.current_stop, current_price * 0.98)

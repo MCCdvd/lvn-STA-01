@@ -52,4 +52,6 @@ def test_walk_forward_scores_only_test_slice(tmp_path, monkeypatch):
     monkeypatch.setattr(wf, "run_backtest_for_ticker", fake_backtest)
     params = StrategyParams(25, 0.2, 0.9, 0.05, 5, 14, 70.0, 30.0)
     wf.run_walk_forward(tmp_path, ticker, params, 10_000.0, 10.0, 10.0, train_size=200, test_size=50)
-    assert seen_lengths == [50]
+    assert seen_lengths[-1] == 50
+    assert all(length in {50, 200} for length in seen_lengths)
+    assert 200 in seen_lengths

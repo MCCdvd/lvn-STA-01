@@ -84,6 +84,3 @@ def load_settings(profile: Profile | None = None) -> AppConfig:
     )
     cfg.strategy.validate()
     return cfg
-
-
-SETTINGS = load_settings()
