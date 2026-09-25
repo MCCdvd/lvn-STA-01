@@ -330,11 +330,9 @@ def main() -> None:
     )
     summary_by_ticker_df, summary_global_df = build_summaries(trades_df)
 
-    if progress_display.has_skipped_ticker(args.ticker):
-        pass
-    elif summary_by_ticker_df.empty:
+    if not progress_display.has_skipped_ticker(args.ticker) and summary_by_ticker_df.empty:
         progress_display.record_ticker_result(args.ticker, 0, 0.0)
-    else:
+    elif not progress_display.has_skipped_ticker(args.ticker):
         ticker_summary = summary_by_ticker_df.iloc[0]
         progress_display.record_ticker_result(args.ticker, int(ticker_summary["trade_count"]), float(ticker_summary["total_pnl"]))
 

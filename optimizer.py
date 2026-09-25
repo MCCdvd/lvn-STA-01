@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from backtest import build_summaries, run_backtest_for_ticker
+from backtest import _max_drawdown, build_summaries, run_backtest_for_ticker
 from config import CONFIG
 from engine import StrategyParams
 from progress import ProgressDisplay, RunMetrics
@@ -46,18 +46,12 @@ def _run_global_with_shared_params(
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
         )
-        summary_row = _summary_row_for_trades(trades)
         processed_units += 1
         if progress_display is not None:
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,
-                metrics=RunMetrics(
-                    trades_found=int(len(trades)),
-                    total_pnl=float(summary_row["total_pnl"]),
-                    win_rate=float(summary_row["overall_win_rate"]),
-                    max_drawdown=float(summary_row["max_drawdown"]),
-                ),
+                metrics=_progress_metrics_for_trades(trades),
                 context="Baseline shared parameters",
             )
         if not trades.empty:
@@ -77,6 +71,20 @@ def _save_baseline(output_dir: str, params: StrategyParams, trades_df: pd.DataFr
     summary_global_df.to_csv(os.path.join(baseline_dir, "summary_global.csv"), index=False)
     pd.DataFrame([asdict(params)]).to_csv(os.path.join(baseline_dir, "params.csv"), index=False)
     return summary_global_df
+
+
+def _progress_metrics_for_trades(trades_df: pd.DataFrame) -> RunMetrics:
+    trade_count = int(len(trades_df))
+    if trades_df.empty:
+        return RunMetrics()
+    total_pnl = float(trades_df["realized_pnl"].sum())
+    win_rate = float((trades_df["realized_pnl"] > 0).sum() / trade_count) * 100 if trade_count else 0.0
+    return RunMetrics(
+        trades_found=trade_count,
+        total_pnl=total_pnl,
+        win_rate=win_rate,
+        max_drawdown=_max_drawdown(trades_df),
+    )
 
 
 def _summary_row_for_trades(trades_df: pd.DataFrame) -> Dict[str, float]:
