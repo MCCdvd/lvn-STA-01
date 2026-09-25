@@ -10,6 +10,14 @@ from backtest import run_backtest_for_ticker
 from engine import StrategyParams
 
 
+class _ForbiddenProgressDisplay:
+    def __bool__(self) -> bool:
+        raise AssertionError("progress display should not be evaluated")
+
+    def __getattr__(self, _: str) -> object:
+        raise AssertionError("progress display should not be accessed")
+
+
 class RunBacktestForTickerTests(unittest.TestCase):
     def test_ignores_legacy_progress_kwargs(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
@@ -40,7 +48,7 @@ class RunBacktestForTickerTests(unittest.TestCase):
                 investimento_per_trade=10_000.0,
                 commissione_apertura=10.0,
                 commissione_chiusura=10.0,
-                progress_display=object(),
+                progress_display=_ForbiddenProgressDisplay(),
                 progress_update_interval=0.0,
                 enable_progress=True,
             )
