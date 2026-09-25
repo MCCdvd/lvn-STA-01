@@ -36,6 +36,14 @@ class PathValidationTests(unittest.TestCase):
                 resolve_directory(tmp_file.name, "--data-dir")
             self.assertIn("must point to a directory", str(ctx.exception))
 
+    def test_resolve_path_keeps_windows_absolute_forms(self) -> None:
+        drive_path = r"C:\Users\tester\data"
+        unc_backslash = r"\\server\share\data"
+        unc_forward = "//server/share/data"
+        self.assertEqual(resolve_path(drive_path), os.path.normpath(drive_path))
+        self.assertEqual(resolve_path(unc_backslash), os.path.normpath(unc_backslash))
+        self.assertEqual(resolve_path(unc_forward), os.path.normpath(unc_forward))
+
 
 if __name__ == "__main__":
     unittest.main()

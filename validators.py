@@ -6,7 +6,7 @@ from typing import Optional
 
 
 _WINDOWS_DRIVE_PATH_RE = re.compile(r"^[a-zA-Z]:[\\/]")
-_WINDOWS_UNC_PATH_RE = re.compile(r"^\\\\[^\\]+\\[^\\]+")
+_WINDOWS_UNC_PATH_RE = re.compile(r"^(?:\\\\|//)[^\\/]+[\\/][^\\/]+")
 _WINDOWS_ENV_VAR_RE = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
 
 
