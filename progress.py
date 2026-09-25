@@ -72,6 +72,9 @@ class ProgressDisplay:
         self.skipped_tickers.add(ticker)
         self.ticker_results.pop(ticker, None)
 
+    def has_skipped_ticker(self, ticker: str) -> bool:
+        return ticker in self.skipped_tickers
+
     def update(
         self,
         processed_units: int,

@@ -251,7 +251,7 @@ def main() -> None:
         )
         processed_units += 1
         best_summary_row = _summary_row_for_trades(best_trades)
-        if ticker not in progress_display.skipped_tickers:
+        if not progress_display.has_skipped_ticker(ticker):
             progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
         progress_display.update(
             processed_units=processed_units,
