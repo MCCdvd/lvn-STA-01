@@ -1,23 +1,13 @@
-# LVN Single Ticker Analysis
+# LVN STA 01
 
-Workspace standalone per ottimizzare e validare parametri LVN **su ciascun titolo**.
+Professional LVN backtesting framework.
 
-## Obiettivo
-
-- trovare parametri migliori ticker-by-ticker
-- salvare output separati per ogni ticker
-- confrontare il risultato con una baseline globale a parametri condivisi
-
-## Moduli minimi
-
-- `config.py`: default runtime/strategia/grid
-- `engine.py`: logica segnali LVN + filtro RSI
-- `backtest.py`: backtest per singolo ticker
-- `optimizer.py`: ottimizzazione per ticker + confronto baseline
-
-## Flusso CLI
-
-1. Backtest singolo ticker
+## Quick start
 
 ```bash
-python /home/runner/work/LVN-Sentinel/LVN-Sentinel/single_ticker_analysis/backtest.py --ticker UCG
+pip install -r requirements.txt
+python -m src.cli.main validate
+python -m src.cli.main backtest --ticker UCG
+```
+
+See detailed docs in `docs/`.
