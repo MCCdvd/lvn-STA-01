@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import ntpath
 from typing import Optional
 
 
@@ -34,10 +35,12 @@ def resolve_path(raw_path: str) -> str:
         raise PathValidationError("Path value cannot be empty.")
 
     expanded = _expand_windows_env_vars(os.path.expandvars(os.path.expanduser(value)))
+    if os.name == "nt" and ntpath.isabs(expanded):
+        return ntpath.normpath(expanded)
     if os.path.isabs(expanded):
         return os.path.normpath(expanded)
     if os.name == "nt" and _is_windows_absolute_path(expanded):
-        return os.path.normpath(expanded)
+        return ntpath.normpath(expanded)
     return os.path.abspath(os.path.normpath(expanded))
 
 

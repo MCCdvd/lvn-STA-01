@@ -59,6 +59,11 @@ class PathValidationTests(unittest.TestCase):
                 with self.assertRaises(PathValidationError):
                     resolve_directory(drive_path, "--data-dir", must_exist=True)
 
+    def test_resolve_path_windows_rooted_current_drive_form(self) -> None:
+        rooted = r"\temp\data"
+        with mock.patch("validators.os.name", "nt"):
+            self.assertEqual(resolve_path(rooted), rooted)
+
     def test_resolve_directory_rejects_conflicting_flags(self) -> None:
         with self.assertRaises(PathValidationError):
             resolve_directory(".", "--data-dir", must_exist=True, create=True)
