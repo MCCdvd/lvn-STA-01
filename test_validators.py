@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from validators import PathValidationError, resolve_directory, resolve_path
 
@@ -14,11 +15,11 @@ class PathValidationTests(unittest.TestCase):
 
     def test_resolve_path_expands_home_and_env_vars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            os.environ["LVN_TEST_DIR"] = tmp_dir
-            env_path = resolve_path("$LVN_TEST_DIR")
-            windows_env_path = resolve_path("%LVN_TEST_DIR%")
-            self.assertEqual(env_path, os.path.normpath(tmp_dir))
-            self.assertEqual(windows_env_path, os.path.normpath(tmp_dir))
+            with mock.patch.dict(os.environ, {"LVN_TEST_DIR": tmp_dir}, clear=False):
+                env_path = resolve_path("$LVN_TEST_DIR")
+                windows_env_path = resolve_path("%LVN_TEST_DIR%")
+                self.assertEqual(env_path, os.path.normpath(tmp_dir))
+                self.assertEqual(windows_env_path, os.path.normpath(tmp_dir))
             self.assertEqual(resolve_path("~"), os.path.normpath(os.path.expanduser("~")))
 
     def test_resolve_directory_reports_helpful_error(self) -> None:
@@ -28,6 +29,12 @@ class PathValidationTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("--data-dir directory does not exist", message)
         self.assertIn(bad_dir, message)
+
+    def test_resolve_directory_rejects_file_paths(self) -> None:
+        with tempfile.NamedTemporaryFile() as tmp_file:
+            with self.assertRaises(PathValidationError) as ctx:
+                resolve_directory(tmp_file.name, "--data-dir")
+            self.assertIn("must point to a directory", str(ctx.exception))
 
 
 if __name__ == "__main__":
