@@ -44,6 +44,16 @@ class PathValidationTests(unittest.TestCase):
         self.assertEqual(resolve_path(unc_backslash), os.path.normpath(unc_backslash))
         self.assertEqual(resolve_path(unc_forward), os.path.normpath(unc_forward))
 
+    def test_resolve_directory_windows_absolute_must_exist_validation(self) -> None:
+        drive_path = r"C:\Users\tester\data"
+        normalized = os.path.normpath(drive_path)
+        with mock.patch("os.path.exists", return_value=True), mock.patch("os.path.isdir", return_value=True):
+            self.assertEqual(resolve_directory(drive_path, "--data-dir", must_exist=True), normalized)
+
+        with mock.patch("os.path.exists", return_value=False), mock.patch("os.path.isdir", return_value=False):
+            with self.assertRaises(PathValidationError):
+                resolve_directory(drive_path, "--data-dir", must_exist=True)
+
 
 if __name__ == "__main__":
     unittest.main()
