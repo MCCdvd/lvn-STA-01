@@ -74,14 +74,16 @@ def run_backtest_for_ticker(
         date_str = str(pd.to_datetime(row["Date"]).date())
         close_price = float(row["Close"])
         signal, _, _, _ = signal_for_index(df, idx, params)
+        closed_this_bar = False
 
         if position is not None:
             closed_trade = _update_position(position, df, idx, date_str, close_price, params, commissione_chiusura)
             if closed_trade is not None:
                 trades.append(closed_trade)
                 position = None
+                closed_this_bar = True
 
-        if position is None and signal in {"LONG", "SHORT"}:
+        if position is None and (not closed_this_bar) and signal in {"LONG", "SHORT"}:
             position = open_position(ticker, signal, date_str, close_price, investimento_per_trade, commissione_apertura)
 
     if position is not None:

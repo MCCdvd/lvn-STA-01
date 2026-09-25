@@ -12,9 +12,9 @@ def generate_dashboard(summary_global: pd.DataFrame, summary_by_ticker: pd.DataF
 <body>
 <h1>LVN Dashboard</h1>
 <h2>Global</h2>
-{summary_global.to_html(index=False)}
+{summary_global.to_html(index=False, escape=True)}
 <h2>By Ticker</h2>
-{summary_by_ticker.to_html(index=False)}
+{summary_by_ticker.to_html(index=False, escape=True)}
 </body></html>
 """
     output_file.write_text(html, encoding="utf-8")

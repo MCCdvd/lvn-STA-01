@@ -23,11 +23,11 @@ def write_html_report(result: BacktestResult, output_file: Path, title: str = "L
 <body>
   <h1>{title}</h1>
   <h2>Global Summary</h2>
-  {result.summary_global.to_html(index=False)}
+  {result.summary_global.to_html(index=False, escape=True)}
   <h2>Summary by Ticker</h2>
-  {result.summary_by_ticker.to_html(index=False)}
+  {result.summary_by_ticker.to_html(index=False, escape=True)}
   <h2>Trades (first 100)</h2>
-  {result.trades.head(100).to_html(index=False)}
+  {result.trades.head(100).to_html(index=False, escape=True)}
 </body></html>
 """
     output_file.write_text(html, encoding="utf-8")

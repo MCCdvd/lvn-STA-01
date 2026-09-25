@@ -26,3 +26,4 @@ def test_walk_forward_result_shape(tmp_path):
     params = StrategyParams(25, 0.2, 0.9, 0.05, 5, 14, 70.0, 30.0)
     out = run_walk_forward(tmp_path, ticker, params, 10_000.0, 10.0, 10.0, train_size=200, test_size=50)
     assert "window_start" in out.windows.columns
+    assert not (tmp_path / ".wf_tmp").exists()
