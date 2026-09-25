@@ -11,6 +11,7 @@ import pandas as pd
 from backtest import build_summaries, run_backtest_for_ticker
 from config import CONFIG
 from engine import StrategyParams
+from validators import PathValidationError, resolve_directory
 
 
 def _parse_int_list(raw: str) -> List[int]:
@@ -94,14 +95,27 @@ def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Single ticker optimizer + baseline comparison")
-    parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
-    parser.add_argument("--output-dir", default=CONFIG.runtime.output_dir)
+    parser.add_argument(
+        "--data-dir",
+        default=CONFIG.runtime.data_dir,
+        help="Data directory (supports absolute/relative paths, ~, and env vars).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=CONFIG.runtime.output_dir,
+        help="Output directory (supports absolute/relative paths, ~, and env vars).",
+    )
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--window-profiles", default=",".join(map(str, CONFIG.grid.window_profiles)))
     parser.add_argument("--price-tolerances", default=",".join(map(str, CONFIG.grid.price_tolerances)))
     parser.add_argument("--lvn-thresholds", default=",".join(map(str, CONFIG.grid.lvn_thresholds)))
     parser.add_argument("--top-n", type=int, default=CONFIG.grid.top_n)
     args = parser.parse_args()
+    try:
+        args.data_dir = resolve_directory(args.data_dir, "--data-dir", must_exist=True)
+        args.output_dir = resolve_directory(args.output_dir, "--output-dir", create=True)
+    except PathValidationError as exc:
+        raise ValueError(str(exc)) from exc
 
     tickers = args.tickers if args.tickers else _discover_tickers(args.data_dir)
     if not tickers:

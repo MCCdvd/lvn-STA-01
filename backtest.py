@@ -9,6 +9,7 @@ import pandas as pd
 
 from config import CONFIG
 from engine import StrategyParams, safe_read_csv, signal_for_index
+from validators import PathValidationError, resolve_directory
 
 
 @dataclass
@@ -197,10 +198,23 @@ def build_summaries(trades_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backtest single ticker analysis")
-    parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
+    parser.add_argument(
+        "--data-dir",
+        default=CONFIG.runtime.data_dir,
+        help="Data directory (supports absolute/relative paths, ~, and env vars).",
+    )
     parser.add_argument("--ticker", required=True)
-    parser.add_argument("--output-dir", default=CONFIG.runtime.output_dir)
+    parser.add_argument(
+        "--output-dir",
+        default=CONFIG.runtime.output_dir,
+        help="Output directory (supports absolute/relative paths, ~, and env vars).",
+    )
     args = parser.parse_args()
+    try:
+        args.data_dir = resolve_directory(args.data_dir, "--data-dir", must_exist=True)
+        args.output_dir = resolve_directory(args.output_dir, "--output-dir", create=True)
+    except PathValidationError as exc:
+        raise ValueError(str(exc)) from exc
 
     params = StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
