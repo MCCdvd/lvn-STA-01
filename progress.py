@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 import time
 from dataclasses import dataclass
@@ -60,12 +59,18 @@ class ProgressDisplay:
         self.start_time = time.monotonic()
         self.last_render_time = 0.0
         self.ticker_results: Dict[str, Dict[str, float]] = {}
+        self.skipped_tickers: set[str] = set()
 
     def set_total_units(self, total_units: int) -> None:
         self.total_units = max(int(total_units), 1)
 
     def record_ticker_result(self, ticker: str, trade_count: int, total_pnl: float) -> None:
+        self.skipped_tickers.discard(ticker)
         self.ticker_results[ticker] = {"trade_count": int(trade_count), "total_pnl": float(total_pnl)}
+
+    def record_skipped_ticker(self, ticker: str) -> None:
+        self.skipped_tickers.add(ticker)
+        self.ticker_results.pop(ticker, None)
 
     def update(
         self,
@@ -130,6 +135,7 @@ class ProgressDisplay:
             f"Total processing time: {format_duration(elapsed)}",
             f"Tickers with trades: {with_trades}",
             f"Tickers without trades: {without_trades}",
+            f"Skipped tickers: {len(self.skipped_tickers)}",
             f"Best performing ticker: {self._format_best_or_worst(best=True)}",
             f"Worst performing ticker: {self._format_best_or_worst(best=False)}",
             "",
@@ -169,6 +175,3 @@ class ProgressDisplay:
             print("\n".join(lines), file=self.stream, flush=True)
         except BrokenPipeError:
             self.enabled = False
-            if self.stream is sys.stdout:
-                sys.stdout = open(os.devnull, "w", encoding=getattr(self.stream, "encoding", None) or "utf-8")
-                self.stream = sys.stdout

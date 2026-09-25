@@ -136,7 +136,7 @@ def _score_ticker_combos(
                 processed_units=processed_units,
                 current_ticker=ticker,
                 metrics=RunMetrics(
-                    trades_found=int(metrics["trade_count"]),
+                    trades_found=int(len(trades_df)),
                     total_pnl=float(metrics["total_pnl"]),
                     win_rate=float(metrics["overall_win_rate"]),
                     max_drawdown=float(metrics["max_drawdown"]),
@@ -251,7 +251,8 @@ def main() -> None:
         )
         processed_units += 1
         best_summary_row = _summary_row_for_trades(best_trades)
-        progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
+        if ticker not in progress_display.skipped_tickers:
+            progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
         progress_display.update(
             processed_units=processed_units,
             current_ticker=ticker,
@@ -313,7 +314,10 @@ def main() -> None:
     )
     comparison.to_csv(os.path.join(args.output_dir, "comparison_baseline_vs_per_ticker.csv"), index=False)
     progress_display.print_summary(total_time_seconds=time.monotonic() - started_at)
-    print(f"Ottimizzazione completata. Output: {args.output_dir}")
+    try:
+        print(f"Ottimizzazione completata. Output: {args.output_dir}")
+    except BrokenPipeError:
+        return
 
 
 if __name__ == "__main__":

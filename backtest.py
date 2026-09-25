@@ -136,6 +136,16 @@ def run_backtest_for_ticker(
     file_path = os.path.join(data_dir, f"{ticker}.csv")
     df = safe_read_csv(file_path)
     if df is None or len(df) < params.window_profile + 1:
+        if progress_display is not None:
+            progress_display.set_total_units(1)
+            progress_display.record_skipped_ticker(ticker)
+            progress_display.update(
+                processed_units=1,
+                current_ticker=ticker,
+                metrics=RunMetrics(),
+                context="Single ticker backtest (skipped: missing or insufficient data)",
+                force=True,
+            )
         return pd.DataFrame(columns=["ticker", "direction", "entry_date", "exit_date", "entry_price", "exit_price", "quantity", "realized_pnl", "return_pct", "exit_reason"])
 
     trades: List[Dict] = []
@@ -320,7 +330,9 @@ def main() -> None:
     )
     summary_by_ticker_df, summary_global_df = build_summaries(trades_df)
 
-    if summary_by_ticker_df.empty:
+    if args.ticker in progress_display.skipped_tickers:
+        pass
+    elif summary_by_ticker_df.empty:
         progress_display.record_ticker_result(args.ticker, 0, 0.0)
     else:
         ticker_summary = summary_by_ticker_df.iloc[0]
@@ -332,7 +344,10 @@ def main() -> None:
     summary_by_ticker_df.to_csv(os.path.join(ticker_dir, "summary_by_ticker.csv"), index=False)
     summary_global_df.to_csv(os.path.join(ticker_dir, "summary_global.csv"), index=False)
     progress_display.print_summary()
-    print(f"Output salvati in: {ticker_dir}")
+    try:
+        print(f"Output salvati in: {ticker_dir}")
+    except BrokenPipeError:
+        return
 
 
 if __name__ == "__main__":

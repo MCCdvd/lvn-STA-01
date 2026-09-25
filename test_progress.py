@@ -12,6 +12,8 @@ class ProgressDisplayTests(unittest.TestCase):
         self.assertEqual(format_percentage(58.34), "58.3%")
         self.assertEqual(format_duration(45.2), "45.2s")
         self.assertEqual(format_duration(125), "2m 05s")
+        self.assertEqual(format_duration(None), "n/a")
+        self.assertEqual(format_duration(float("inf")), "n/a")
 
     def test_progress_and_summary_output(self) -> None:
         stream = io.StringIO()
@@ -43,6 +45,36 @@ class ProgressDisplayTests(unittest.TestCase):
         self.assertIn("Total processing time: 12.5s", output)
         self.assertIn("Tickers with trades: 1", output)
         self.assertIn("Tickers without trades: 1", output)
+        self.assertIn("Skipped tickers: 0", output)
+
+    def test_empty_summary_and_disabled_rendering(self) -> None:
+        stream = io.StringIO()
+        display = ProgressDisplay(
+            title="LVN Progress",
+            total_units=1,
+            unit_label="runs",
+            update_interval_seconds=0.0,
+            stream=stream,
+            use_unicode=False,
+        )
+        display.record_skipped_ticker("BAD")
+        display.print_summary(total_time_seconds=0.0)
+        self.assertIn("Best performing ticker: n/a", stream.getvalue())
+        self.assertIn("Worst performing ticker: n/a", stream.getvalue())
+        self.assertIn("Skipped tickers: 1", stream.getvalue())
+
+        disabled_stream = io.StringIO()
+        disabled_display = ProgressDisplay(
+            title="Disabled",
+            total_units=1,
+            unit_label="runs",
+            enabled=False,
+            stream=disabled_stream,
+            use_unicode=False,
+        )
+        disabled_display.update(1, "A2A", RunMetrics(), force=True)
+        disabled_display.print_summary(total_time_seconds=0.0)
+        self.assertEqual(disabled_stream.getvalue(), "")
 
 
 if __name__ == "__main__":
