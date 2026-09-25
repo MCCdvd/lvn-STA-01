@@ -132,12 +132,14 @@ def run_backtest_for_ticker(
     commissione_apertura: float,
     commissione_chiusura: float,
     progress_display: Optional[ProgressDisplay] = None,
+    manage_progress_total: bool = False,
 ) -> pd.DataFrame:
     file_path = os.path.join(data_dir, f"{ticker}.csv")
     df = safe_read_csv(file_path)
     if df is None or len(df) < params.window_profile + 1:
         if progress_display is not None:
-            progress_display.set_total_units(1)
+            if manage_progress_total:
+                progress_display.set_total_units(1)
             progress_display.record_skipped_ticker(ticker)
             progress_display.update(
                 processed_units=1,
@@ -151,7 +153,7 @@ def run_backtest_for_ticker(
     trades: List[Dict] = []
     position: Optional[PositionState] = None
     total_steps = max(len(df) - params.window_profile, 1)
-    if progress_display is not None:
+    if progress_display is not None and manage_progress_total:
         progress_display.set_total_units(total_steps)
 
     total_pnl = 0.0
@@ -327,6 +329,7 @@ def main() -> None:
         commissione_apertura=CONFIG.strategy.commissione_apertura,
         commissione_chiusura=CONFIG.strategy.commissione_chiusura,
         progress_display=progress_display,
+        manage_progress_total=True,
     )
     summary_by_ticker_df, summary_global_df = build_summaries(trades_df)
 

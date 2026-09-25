@@ -259,20 +259,21 @@ def main() -> None:
         )
         processed_units += 1
         best_summary_row = _summary_row_for_trades(best_trades)
-        if not progress_display.has_skipped_ticker(ticker):
-            progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
-        progress_display.update(
-            processed_units=processed_units,
-            current_ticker=ticker,
-            metrics=RunMetrics(
-                trades_found=int(len(best_trades)),
-                total_pnl=float(best_summary_row["total_pnl"]),
-                win_rate=float(best_summary_row["overall_win_rate"]),
-                max_drawdown=float(best_summary_row["max_drawdown"]),
-            ),
-            context="Best parameters validation",
-            force=processed_units == total_progress_units,
-        )
+        if progress_display is not None:
+            if not progress_display.has_skipped_ticker(ticker):
+                progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
+            progress_display.update(
+                processed_units=processed_units,
+                current_ticker=ticker,
+                metrics=RunMetrics(
+                    trades_found=int(len(best_trades)),
+                    total_pnl=float(best_summary_row["total_pnl"]),
+                    win_rate=float(best_summary_row["overall_win_rate"]),
+                    max_drawdown=float(best_summary_row["max_drawdown"]),
+                ),
+                context="Best parameters validation",
+                force=processed_units == total_progress_units,
+            )
         if not best_trades.empty:
             best_trades_frames.append(best_trades)
 
