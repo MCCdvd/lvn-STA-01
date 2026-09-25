@@ -38,10 +38,18 @@ class GridConfig:
 
 
 @dataclass(frozen=True)
+class ProgressConfig:
+    enabled: bool = True
+    update_interval_seconds: float = 1.0
+    bar_width: int = 32
+
+
+@dataclass(frozen=True)
 class AppConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     grid: GridConfig = field(default_factory=GridConfig)
+    progress: ProgressConfig = field(default_factory=ProgressConfig)
 
 
 CONFIG = AppConfig()
