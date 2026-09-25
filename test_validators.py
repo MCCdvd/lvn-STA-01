@@ -54,6 +54,10 @@ class PathValidationTests(unittest.TestCase):
             with self.assertRaises(PathValidationError):
                 resolve_directory(drive_path, "--data-dir", must_exist=True)
 
+    def test_resolve_directory_rejects_conflicting_flags(self) -> None:
+        with self.assertRaises(PathValidationError):
+            resolve_directory(".", "--data-dir", must_exist=True, create=True)
+
 
 if __name__ == "__main__":
     unittest.main()

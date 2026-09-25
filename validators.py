@@ -40,6 +40,11 @@ def resolve_path(raw_path: str) -> str:
 
 
 def resolve_directory(raw_path: str, option_name: str, must_exist: bool = False, create: bool = False) -> str:
+    if must_exist and create:
+        raise PathValidationError(
+            f"{option_name} cannot be resolved with both must_exist=True and create=True."
+        )
+
     resolved = resolve_path(raw_path)
     if os.path.exists(resolved) and not os.path.isdir(resolved):
         raise PathValidationError(
