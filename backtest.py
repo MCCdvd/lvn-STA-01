@@ -133,10 +133,16 @@ def run_backtest_for_ticker(
     commissione_chiusura: float,
     progress_display: Optional[ProgressDisplay] = None,
     manage_progress_total: bool = False,
+    run_metadata: Optional[Dict[str, bool]] = None,
 ) -> pd.DataFrame:
+    if run_metadata is not None:
+        run_metadata["skipped"] = False
+
     file_path = os.path.join(data_dir, f"{ticker}.csv")
     df = safe_read_csv(file_path)
     if df is None or len(df) < params.window_profile + 1:
+        if run_metadata is not None:
+            run_metadata["skipped"] = True
         if progress_display is not None:
             if manage_progress_total:
                 progress_display.set_total_units(1)

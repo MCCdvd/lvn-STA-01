@@ -38,6 +38,7 @@ def _run_global_with_shared_params(
 ) -> Tuple[pd.DataFrame, int]:
     all_trades: List[pd.DataFrame] = []
     for ticker in tickers:
+        run_metadata: Dict[str, bool] = {}
         trades = run_backtest_for_ticker(
             data_dir=data_dir,
             ticker=ticker,
@@ -45,9 +46,12 @@ def _run_global_with_shared_params(
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
         processed_units += 1
         if progress_display is not None:
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,
@@ -119,6 +123,7 @@ def _score_ticker_combos(
             rsi_long_max=CONFIG.strategy.rsi_long_max,
             rsi_short_min=CONFIG.strategy.rsi_short_min,
         )
+        run_metadata: Dict[str, bool] = {}
         trades_df = run_backtest_for_ticker(
             data_dir=data_dir,
             ticker=ticker,
@@ -126,6 +131,7 @@ def _score_ticker_combos(
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
         metrics = _summary_row_for_trades(trades_df)
         metrics.update(
@@ -140,6 +146,8 @@ def _score_ticker_combos(
         rows.append(metrics)
         processed_units += 1
         if progress_display is not None:
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,
@@ -249,6 +257,7 @@ def main() -> None:
             rsi_long_max=CONFIG.strategy.rsi_long_max,
             rsi_short_min=CONFIG.strategy.rsi_short_min,
         )
+        run_metadata: Dict[str, bool] = {}
         best_trades = run_backtest_for_ticker(
             data_dir=args.data_dir,
             ticker=ticker,
@@ -256,12 +265,15 @@ def main() -> None:
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
         processed_units += 1
         best_summary_row = _summary_row_for_trades(best_trades)
         if progress_display is not None:
-            if not progress_display.has_skipped_ticker(ticker):
-                progress_display.record_ticker_result(ticker, int(len(best_trades)), float(best_summary_row["total_pnl"]))
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
+            elif not progress_display.has_skipped_ticker(ticker):
+                progress_display.record_ticker_result(ticker, int(best_summary_row["total_trades"]), float(best_summary_row["total_pnl"]))
             progress_display.update(
                 processed_units=processed_units,
                 current_ticker=ticker,

@@ -76,6 +76,27 @@ class ProgressDisplayTests(unittest.TestCase):
         disabled_display.print_summary(total_time_seconds=0.0)
         self.assertEqual(disabled_stream.getvalue(), "")
 
+    def test_broken_pipe_disables_further_output(self) -> None:
+        class BrokenStream:
+            encoding = "utf-8"
+
+            def write(self, _: str) -> int:
+                raise BrokenPipeError()
+
+            def flush(self) -> None:
+                return None
+
+        display = ProgressDisplay(
+            title="Broken",
+            total_units=1,
+            unit_label="runs",
+            update_interval_seconds=0.0,
+            stream=BrokenStream(),
+        )
+        display.update(1, "A2A", RunMetrics(), force=True)
+        self.assertFalse(display.enabled)
+        display.print_summary(total_time_seconds=0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
