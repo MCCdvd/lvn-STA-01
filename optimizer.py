@@ -115,7 +115,7 @@ def main() -> None:
         args.data_dir = resolve_directory(args.data_dir, "--data-dir", must_exist=True)
         args.output_dir = resolve_directory(args.output_dir, "--output-dir", create=True)
     except PathValidationError as exc:
-        raise ValueError(str(exc)) from exc
+        parser.error(str(exc))
 
     tickers = args.tickers if args.tickers else _discover_tickers(args.data_dir)
     if not tickers:
