@@ -116,7 +116,11 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
                     if isinstance(row, dict) and row.get("ticker") and _looks_like_ticker_row(row):
                         rows.append((str(row["ticker"]), _normalize_row(row)))
                 return rows
-            raise ValueError("Invalid optimized params format: 'tickers' must be a dict or list")
+            tickers_value = payload.get("tickers")
+            raise ValueError(
+                "Invalid optimized params format: "
+                f"'tickers' must be a dict or list, got {type(tickers_value).__name__}: {tickers_value!r}"
+            )
 
         rows = []
         for key, value in payload.items():
