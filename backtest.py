@@ -205,6 +205,12 @@ def _parse_bool(raw: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {raw}")
 
 
+def _default_data_dir() -> str:
+    if os.path.isdir(CONFIG.runtime.data_dir):
+        return CONFIG.runtime.data_dir
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def _build_default_params() -> StrategyParams:
     return StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
@@ -235,7 +241,7 @@ def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_param
     if not use_optimized:
         return _build_default_params(), None
 
-    loader = get_optimized_params_loader(optimized_params_path, force_reload=True)
+    loader = get_optimized_params_loader(optimized_params_path)
     optimized = loader.get_ticker_params(ticker)
     if optimized is None:
         return _build_default_params(), None
@@ -268,7 +274,7 @@ def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optio
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backtest single ticker analysis")
-    parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
+    parser.add_argument("--data-dir", default=_default_data_dir())
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--output-dir", default=CONFIG.runtime.output_dir)
     parser.add_argument(

@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import List
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    data_dir: str = str(REPO_ROOT)
+    data_dir: str = str(REPO_ROOT / "data")
     output_dir: str = str(REPO_ROOT / "database" / "single_ticker_analysis")
 
 

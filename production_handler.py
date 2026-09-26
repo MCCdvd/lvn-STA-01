@@ -53,22 +53,25 @@ class OptimizedParamsLoader:
         self.source_file = raw_payload.get("source_file")
 
         tickers = raw_payload.get("tickers", {})
-        self._params_by_ticker = {
-            ticker: OptimizedParams(
+        self._params_by_ticker = {}
+        for ticker, data in tickers.items():
+            parameters = data.get("parameters", {})
+            if not {"window_profile", "price_tolerance", "lvn_threshold"}.issubset(parameters):
+                continue
+            metrics = data.get("metrics", {})
+            self._params_by_ticker[ticker] = OptimizedParams(
                 ticker=ticker,
-                window_profile=int(data["parameters"]["window_profile"]),
-                price_tolerance=float(data["parameters"]["price_tolerance"]),
-                lvn_threshold=float(data["parameters"]["lvn_threshold"]),
+                window_profile=int(parameters["window_profile"]),
+                price_tolerance=float(parameters["price_tolerance"]),
+                lvn_threshold=float(parameters["lvn_threshold"]),
                 metrics=OptimizationMetrics(
-                    total_pnl=float(data["metrics"].get("total_pnl", 0.0)),
-                    win_rate=float(data["metrics"].get("win_rate", 0.0)),
-                    profit_factor=float(data["metrics"].get("profit_factor", 0.0)),
-                    trade_count=int(data["metrics"].get("trade_count", 0)),
-                    max_drawdown=float(data["metrics"].get("max_drawdown", 0.0)),
+                    total_pnl=float(metrics.get("total_pnl", 0.0)),
+                    win_rate=float(metrics.get("win_rate", 0.0)),
+                    profit_factor=float(metrics.get("profit_factor", 0.0)),
+                    trade_count=int(metrics.get("trade_count", 0)),
+                    max_drawdown=float(metrics.get("max_drawdown", 0.0)),
                 ),
             )
-            for ticker, data in tickers.items()
-        }
 
     def has_ticker(self, ticker: str) -> bool:
         return ticker in self._params_by_ticker
