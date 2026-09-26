@@ -37,6 +37,7 @@ class OptimizedParamsLoader:
     def __init__(self, json_path: Path):
         self.json_path = json_path
         self.file_found = False
+        self.load_error: Optional[str] = None
         self.generated_at: Optional[str] = None
         self.source_file: Optional[str] = None
         self._params_by_ticker: Dict[str, OptimizedParams] = {}
@@ -54,17 +55,34 @@ class OptimizedParamsLoader:
             return
 
         self.file_found = True
-        raw_payload = json.loads(self.json_path.read_text(encoding="utf-8"))
+        try:
+            raw_payload = json.loads(self.json_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            self.load_error = f"Invalid JSON in {self.json_path}"
+            return
+        if not isinstance(raw_payload, dict):
+            self.load_error = f"Invalid payload in {self.json_path}"
+            return
+
         self.generated_at = raw_payload.get("generated_at")
         self.source_file = raw_payload.get("source_file")
 
         tickers = raw_payload.get("tickers", {})
+        if not isinstance(tickers, dict):
+            self.load_error = f"Invalid tickers payload in {self.json_path}"
+            return
         self._params_by_ticker = {}
         for ticker, data in tickers.items():
+            if not isinstance(data, dict):
+                continue
             parameters = data.get("parameters", {})
+            if not isinstance(parameters, dict):
+                continue
             if not {"window_profile", "price_tolerance", "lvn_threshold"}.issubset(parameters):
                 continue
             metrics = data.get("metrics", {})
+            if not isinstance(metrics, dict):
+                metrics = {}
             normalized_ticker = _normalize_ticker(ticker)
             self._params_by_ticker[normalized_ticker] = OptimizedParams(
                 ticker=normalized_ticker,

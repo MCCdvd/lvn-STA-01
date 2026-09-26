@@ -4,12 +4,12 @@ import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Mapping
 
 import pandas as pd
 
 
-def _row_to_payload(row: pd.Series) -> Dict:
+def _row_to_payload(row: Mapping[str, object]) -> Dict:
     return {
         "parameters": {
             "window_profile": int(row["window_profile"]),
@@ -17,11 +17,11 @@ def _row_to_payload(row: pd.Series) -> Dict:
             "lvn_threshold": float(row["lvn_threshold"]),
         },
         "metrics": {
-            "total_pnl": float(row.get("total_pnl", 0.0)),
-            "win_rate": float(row.get("overall_win_rate", row.get("win_rate", 0.0))),
-            "profit_factor": float(row.get("profit_factor", 0.0)),
-            "trade_count": int(row.get("trade_count", row.get("total_trades", 0))),
-            "max_drawdown": float(row.get("max_drawdown", 0.0)),
+            "total_pnl": float(row.get("total_pnl", 0.0) or 0.0),
+            "win_rate": float(row.get("overall_win_rate", row.get("win_rate", 0.0)) or 0.0),
+            "profit_factor": float(row.get("profit_factor", 0.0) or 0.0),
+            "trade_count": int(row.get("trade_count", row.get("total_trades", 0)) or 0),
+            "max_drawdown": float(row.get("max_drawdown", 0.0) or 0.0),
         },
     }
 
@@ -41,12 +41,13 @@ def generate_optimized_params(input_path: str, output_path: str) -> Path:
     if duplicate_tickers:
         duplicates = ", ".join(sorted({str(ticker) for ticker in duplicate_tickers}))
         raise ValueError(f"Duplicate ticker rows found in {source}: {duplicates}")
+    records = df.to_dict(orient="records")
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_file": str(source),
         "ticker_count": int(len(df)),
-        "tickers": {str(row["ticker"]): _row_to_payload(row) for _, row in df.iterrows()},
+        "tickers": {str(row["ticker"]): _row_to_payload(row) for row in records},
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
