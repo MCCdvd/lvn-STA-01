@@ -14,6 +14,7 @@ Workspace standalone per ottimizzare e validare parametri LVN **su ciascun titol
 - `engine.py`: logica segnali LVN + filtro RSI
 - `backtest.py`: backtest per singolo ticker
 - `optimizer.py`: ottimizzazione per ticker + confronto baseline
+- `run_all_tickers_backtest.py`: batch backtest su tutti i ticker con parametri ottimizzati
 
 ## Flusso CLI
 
@@ -21,3 +22,9 @@ Workspace standalone per ottimizzare e validare parametri LVN **su ciascun titol
 
 ```bash
 python /home/runner/work/LVN-Sentinel/LVN-Sentinel/single_ticker_analysis/backtest.py --ticker UCG
+```
+
+2. Backtest batch su tutti i ticker (parametri ottimizzati)
+
+```bash
+python run_all_tickers_backtest.py --optimized-params optimized_params.json --output-dir output/production
