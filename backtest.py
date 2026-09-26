@@ -237,15 +237,15 @@ def _build_strategy_params(optimized: OptimizedParams) -> StrategyParams:
     )
 
 
-def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_params_path: str) -> Tuple[StrategyParams, Optional[OptimizedParams]]:
+def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_params_path: str) -> Tuple[StrategyParams, Optional[OptimizedParams], str]:
     if not use_optimized:
-        return _build_default_params(), None
+        return _build_default_params(), None, optimized_params_path
 
     loader = get_optimized_params_loader(optimized_params_path)
     optimized = loader.get_ticker_params(ticker)
     if optimized is None:
-        return _build_default_params(), None
-    return _build_strategy_params(optimized), optimized
+        return _build_default_params(), None, str(loader.json_path)
+    return _build_strategy_params(optimized), optimized, str(loader.json_path)
 
 
 def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optional[OptimizedParams], optimized_params_path: str, use_optimized: bool) -> None:
@@ -292,8 +292,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    params, optimized = _resolve_params_for_ticker(args.ticker, args.use_optimized, args.optimized_params)
-    _print_selected_params(args.ticker, params, optimized, args.optimized_params, args.use_optimized)
+    params, optimized, optimized_params_path = _resolve_params_for_ticker(args.ticker, args.use_optimized, args.optimized_params)
+    _print_selected_params(args.ticker, params, optimized, optimized_params_path, args.use_optimized)
 
     trades_df = run_backtest_for_ticker(
         data_dir=args.data_dir,
