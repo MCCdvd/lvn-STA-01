@@ -57,8 +57,8 @@ class OptimizedParamsLoader:
         self.file_found = True
         try:
             raw_payload = json.loads(self.json_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            self.load_error = f"Invalid JSON in {self.json_path}"
+        except (OSError, json.JSONDecodeError) as exc:
+            self.load_error = f"Unable to load optimized parameters from {self.json_path}: {exc}"
             return
         if not isinstance(raw_payload, dict):
             self.load_error = f"Invalid payload in {self.json_path}"
@@ -84,19 +84,22 @@ class OptimizedParamsLoader:
             if not isinstance(metrics, dict):
                 metrics = {}
             normalized_ticker = _normalize_ticker(ticker)
-            self._params_by_ticker[normalized_ticker] = OptimizedParams(
-                ticker=normalized_ticker,
-                window_profile=int(parameters["window_profile"]),
-                price_tolerance=float(parameters["price_tolerance"]),
-                lvn_threshold=float(parameters["lvn_threshold"]),
-                metrics=OptimizationMetrics(
-                    total_pnl=float(metrics.get("total_pnl", 0.0)),
-                    win_rate=float(metrics.get("win_rate", 0.0)),
-                    profit_factor=float(metrics.get("profit_factor", 0.0)),
-                    trade_count=int(metrics.get("trade_count", 0)),
-                    max_drawdown=float(metrics.get("max_drawdown", 0.0)),
-                ),
-            )
+            try:
+                self._params_by_ticker[normalized_ticker] = OptimizedParams(
+                    ticker=normalized_ticker,
+                    window_profile=int(parameters["window_profile"]),
+                    price_tolerance=float(parameters["price_tolerance"]),
+                    lvn_threshold=float(parameters["lvn_threshold"]),
+                    metrics=OptimizationMetrics(
+                        total_pnl=float(metrics.get("total_pnl", 0.0)),
+                        win_rate=float(metrics.get("win_rate", 0.0)),
+                        profit_factor=float(metrics.get("profit_factor", 0.0)),
+                        trade_count=int(metrics.get("trade_count", 0)),
+                        max_drawdown=float(metrics.get("max_drawdown", 0.0)),
+                    ),
+                )
+            except (TypeError, ValueError):
+                continue
 
     def has_ticker(self, ticker: str) -> bool:
         return _normalize_ticker(ticker) in self._params_by_ticker

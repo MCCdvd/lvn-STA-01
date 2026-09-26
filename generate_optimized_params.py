@@ -9,6 +9,12 @@ from typing import Dict, Mapping
 import pandas as pd
 
 
+def _value_or_default(value: object, default: float | int) -> float | int:
+    if pd.isna(value):
+        return default
+    return value
+
+
 def _row_to_payload(row: Mapping[str, object]) -> Dict:
     return {
         "parameters": {
@@ -17,11 +23,11 @@ def _row_to_payload(row: Mapping[str, object]) -> Dict:
             "lvn_threshold": float(row["lvn_threshold"]),
         },
         "metrics": {
-            "total_pnl": float(row.get("total_pnl", 0.0) or 0.0),
-            "win_rate": float(row.get("overall_win_rate", row.get("win_rate", 0.0)) or 0.0),
-            "profit_factor": float(row.get("profit_factor", 0.0) or 0.0),
-            "trade_count": int(row.get("trade_count", row.get("total_trades", 0)) or 0),
-            "max_drawdown": float(row.get("max_drawdown", 0.0) or 0.0),
+            "total_pnl": float(_value_or_default(row.get("total_pnl", 0.0), 0.0)),
+            "win_rate": float(_value_or_default(row.get("overall_win_rate", row.get("win_rate", 0.0)), 0.0)),
+            "profit_factor": float(_value_or_default(row.get("profit_factor", 0.0), 0.0)),
+            "trade_count": int(_value_or_default(row.get("trade_count", row.get("total_trades", 0)), 0)),
+            "max_drawdown": float(_value_or_default(row.get("max_drawdown", 0.0), 0.0)),
         },
     }
 
