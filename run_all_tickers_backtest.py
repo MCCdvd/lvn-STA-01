@@ -87,20 +87,28 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
         return row
 
     if isinstance(payload, dict):
-        ticker_payload = payload["tickers"] if isinstance(payload.get("tickers"), dict) else payload
+        if "tickers" in payload:
+            if isinstance(payload.get("tickers"), dict):
+                rows = []
+                for key, value in payload["tickers"].items():
+                    if isinstance(value, dict):
+                        rows.append((str(key), _normalize_row(value)))
+                return rows
+            if isinstance(payload.get("tickers"), list):
+                rows = []
+                for row in payload["tickers"]:
+                    if isinstance(row, dict) and row.get("ticker"):
+                        rows.append((str(row["ticker"]), _normalize_row(row)))
+                return rows
+            return []
+
         rows = []
-        for key, value in ticker_payload.items():
+        for key, value in payload.items():
             if isinstance(value, dict):
                 rows.append((str(key), _normalize_row(value)))
         if rows:
             return rows
 
-        if isinstance(payload.get("tickers"), list):
-            rows = []
-            for row in payload["tickers"]:
-                if isinstance(row, dict) and row.get("ticker"):
-                    rows.append((str(row["ticker"]), _normalize_row(row)))
-            return rows
     if isinstance(payload, list):
         rows = []
         for row in payload:
