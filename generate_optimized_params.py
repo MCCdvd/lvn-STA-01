@@ -37,6 +37,10 @@ def generate_optimized_params(input_path: str, output_path: str) -> Path:
     if missing_columns:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Missing required columns in {source}: {missing}")
+    duplicate_tickers = df["ticker"][df["ticker"].duplicated()].tolist()
+    if duplicate_tickers:
+        duplicates = ", ".join(sorted({str(ticker) for ticker in duplicate_tickers}))
+        raise ValueError(f"Duplicate ticker rows found in {source}: {duplicates}")
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),

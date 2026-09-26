@@ -250,9 +250,9 @@ def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_param
 
 def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optional[OptimizedParams], optimized_params_path: str, use_optimized: bool) -> None:
     if optimized is not None:
-        print(f"Usando parametri ottimizzati per {ticker} da: {optimized_params_path}")
+        print(f"Using optimized parameters for {ticker} from: {optimized_params_path}")
         print(
-            "Statistiche ottimizzazione: "
+            "Optimization statistics: "
             f"trade={optimized.metrics.trade_count}, "
             f"pnl={optimized.metrics.total_pnl:.2f}, "
             f"win_rate={optimized.metrics.win_rate:.2f}%, "
@@ -260,12 +260,12 @@ def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optio
             f"max_drawdown={optimized.metrics.max_drawdown:.2f}"
         )
     elif use_optimized:
-        print(f"Parametri ottimizzati non disponibili per {ticker}, uso i default.")
+        print(f"Optimized parameters not available for {ticker}, using defaults.")
     else:
-        print(f"Uso parametri di default per {ticker}.")
+        print(f"Using default parameters for {ticker}.")
 
     print(
-        "Parametri strategia: "
+        "Strategy parameters: "
         f"window_profile={params.window_profile}, "
         f"price_tolerance={params.price_tolerance}, "
         f"lvn_threshold={params.lvn_threshold}"
@@ -310,7 +310,7 @@ def main() -> None:
     trades_df.to_csv(os.path.join(ticker_dir, "trades.csv"), index=False)
     summary_by_ticker_df.to_csv(os.path.join(ticker_dir, "summary_by_ticker.csv"), index=False)
     summary_global_df.to_csv(os.path.join(ticker_dir, "summary_global.csv"), index=False)
-    print(f"Output salvati in: {ticker_dir}")
+    print(f"Output saved in: {ticker_dir}")
 
 
 if __name__ == "__main__":
