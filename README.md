@@ -17,7 +17,7 @@ Repository for LVN backtesting and parameter optimization across multiple ticker
 - Trigger: every day at **08:00 Europe/Rome** (DST-safe schedule gate).
 - Runs `run_all_tickers_backtest.py` with `optimized_params.json`.
 - Logs results in `backtest_results.db`.
-- Sends email to `dmacchiarini@gmail.com` containing:
+- Sends email to the configured `${{ vars.ALERT_EMAIL }}` recipient, containing:
   - complete ticker ranking (best to worst)
   - total P&L summary
   - execution time
@@ -27,16 +27,18 @@ Repository for LVN backtesting and parameter optimization across multiple ticker
 
 - Trigger: **1st day of month, 10:00 Europe/Rome** (DST-safe schedule gate).
 - Runs `optimizer.py` and refreshes `optimized_params.json`.
+- Commits refreshed `optimized_params.json` back to the repository.
 - Logs optimization run and per-ticker parameter ranking in SQLite.
 - Sends email including:
   - new optimized parameters summary
-  - performance comparison (old vs new from SQLite history)
+  - performance comparison (baseline vs optimized from optimizer output)
   - top/bottom performers
 - On failure, sends an error alert email with log/stack trace tail.
 
 ## SQLite database
 
 Database file: `backtest_results.db` (created automatically on first run).
+In GitHub Actions production runs, successful jobs commit the updated database back to the repository so history remains available across runs.
 
 Main tables:
 
@@ -57,6 +59,10 @@ Add these repository secrets:
 
 - `EMAIL_ADDRESS`: Gmail sender address
 - `EMAIL_PASSWORD`: Gmail App Password (not the normal account password)
+
+Required repository variable:
+
+- `ALERT_EMAIL`: recipient address for daily/monthly notifications
 
 ### Gmail App Password steps
 

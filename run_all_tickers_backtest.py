@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -18,10 +19,13 @@ from engine import StrategyParams
 def _discover_tickers(data_dir: str) -> List[str]:
     if not os.path.isdir(data_dir):
         return []
+    ticker_pattern = re.compile(r'^[A-Z0-9.-]+$')
     return sorted(
         f.replace('.csv', '')
         for f in os.listdir(data_dir)
-        if f.endswith('.csv') and f != 'failed_tickers.csv'
+        if f.endswith('.csv')
+        and f != 'failed_tickers.csv'
+        and ticker_pattern.match(f.replace('.csv', ''))
     )
 
 
@@ -109,12 +113,14 @@ def _run_batch(data_dir: str, ticker_params: List[Tuple[str, Dict]], parallel: b
     workers = max(1, min(max_workers, len(ticker_params)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_run_single_ticker, data_dir, ticker, params): ticker
-            for ticker, params in ticker_params
+            executor.submit(_run_single_ticker, data_dir, ticker, params): index
+            for index, (ticker, params) in enumerate(ticker_params)
         }
+        ordered_results: List[Tuple[int, Dict]] = []
         for future in as_completed(futures):
-            results.append(future.result())
-    return results
+            ordered_results.append((futures[future], future.result()))
+    ordered_results.sort(key=lambda item: item[0])
+    return [item[1] for item in ordered_results]
 
 
 def main() -> None:

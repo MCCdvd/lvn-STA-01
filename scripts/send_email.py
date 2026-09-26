@@ -37,7 +37,9 @@ def send_email(subject: str, body: str, recipient: str, retries: int, retry_dela
     for attempt in range(1, retries + 1):
         try:
             with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as server:
+                server.ehlo()
                 server.starttls(context=context)
+                server.ehlo()
                 server.login(sender, password)
                 server.send_message(msg)
             return

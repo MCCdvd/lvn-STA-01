@@ -99,6 +99,26 @@ def _latest_monthly_total_pnl(conn: sqlite3.Connection) -> float | None:
     return None if row is None else float(row[0])
 
 
+def _to_nullable_int(value) -> int | None:
+    if pd.isna(value):
+        return None
+    return int(value)
+
+
+def _to_nullable_float(value) -> float | None:
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def _to_int_default(value, default: int = 0) -> int:
+    return default if pd.isna(value) else int(value)
+
+
+def _to_float_default(value, default: float = 0.0) -> float:
+    return default if pd.isna(value) else float(value)
+
+
 def log_daily(conn: sqlite3.Connection, summary_csv: Path, ticker_csv: Path) -> Dict:
     summary_df = pd.read_csv(summary_csv)
     ticker_df = pd.read_csv(ticker_csv)
@@ -144,9 +164,9 @@ def log_daily(conn: sqlite3.Connection, summary_csv: Path, ticker_csv: Path) -> 
                     run_id,
                     str(record['ticker']),
                     str(record['status']),
-                    int(record.get('trade_count', 0)),
-                    float(record.get('total_pnl', 0.0)),
-                    float(record.get('win_rate', 0.0)),
+                    _to_int_default(record.get('trade_count', 0)),
+                    _to_float_default(record.get('total_pnl', 0.0)),
+                    _to_float_default(record.get('win_rate', 0.0)),
                     (str(record.get('error', '')) or None),
                 ),
             )
@@ -164,7 +184,26 @@ def log_daily(conn: sqlite3.Connection, summary_csv: Path, ticker_csv: Path) -> 
     }
 
 
-def log_monthly(conn: sqlite3.Connection, optimized_params_json: Path, summary_by_ticker_csv: Path) -> Dict:
+def _extract_optimized_total_pnl(comparison_csv: Path | None, summary_df: pd.DataFrame) -> float:
+    if comparison_csv is not None and comparison_csv.exists():
+        comparison_df = pd.read_csv(comparison_csv)
+        scenario_rows = comparison_df[comparison_df['scenario'] == 'per_ticker_best_global']
+        if not scenario_rows.empty:
+            return _to_float_default(scenario_rows.iloc[0].get('total_pnl'), 0.0)
+
+    if 'ticker' in summary_df.columns:
+        dedup = summary_df.drop_duplicates(subset=['ticker'], keep='first')
+    else:
+        dedup = summary_df
+    return _to_float_default(dedup.get('total_pnl', pd.Series(dtype=float)).sum(), 0.0)
+
+
+def log_monthly(
+    conn: sqlite3.Connection,
+    optimized_params_json: Path,
+    summary_by_ticker_csv: Path,
+    comparison_csv: Path | None = None,
+) -> Dict:
     payload = _load_json(optimized_params_json)
     ticker_payload = payload.get('tickers') if isinstance(payload.get('tickers'), dict) else payload
     if not isinstance(ticker_payload, dict):
@@ -177,23 +216,28 @@ def log_monthly(conn: sqlite3.Connection, optimized_params_json: Path, summary_b
         if isinstance(row.get('ticker'), str)
     }
 
-    ranking = sorted(
-        [
-            (
-                ticker,
-                params.get('params') if isinstance(params.get('params'), dict) else params,
+    ranking: List[tuple] = []
+    for ticker, params in ticker_payload.items():
+        if not isinstance(params, dict):
+            continue
+        resolved = params.get('params') if isinstance(params.get('params'), dict) else params
+        missing_keys = [key for key in ('window_profile', 'price_tolerance', 'lvn_threshold') if key not in resolved]
+        if missing_keys:
+            raise ValueError(
+                f"Missing required params for ticker {ticker}: {', '.join(missing_keys)}"
             )
-            for ticker, params in ticker_payload.items()
-            if isinstance(params, dict)
-        ],
-        key=lambda item: float(summary_map.get(item[0], {}).get('total_pnl', 0.0)),
+        ranking.append((ticker, resolved))
+
+    ranking = sorted(
+        ranking,
+        key=lambda item: (_to_float_default(summary_map.get(item[0], {}).get('total_pnl', 0.0), 0.0)),
         reverse=True,
     )
 
     if not ranking:
         raise ValueError('No optimized ticker params found for monthly logging')
 
-    total_pnl = float(summary_df['total_pnl'].sum()) if 'total_pnl' in summary_df.columns else 0.0
+    total_pnl = _extract_optimized_total_pnl(comparison_csv, summary_df)
     previous_total_pnl = _latest_monthly_total_pnl(conn)
     pnl_delta = None if previous_total_pnl is None else total_pnl - previous_total_pnl
 
@@ -238,9 +282,9 @@ def log_monthly(conn: sqlite3.Connection, optimized_params_json: Path, summary_b
                     int(params['window_profile']),
                     float(params['price_tolerance']),
                     float(params['lvn_threshold']),
-                    int(stats.get('trade_count', 0)) if stats else None,
-                    float(stats.get('total_pnl', 0.0)) if stats else None,
-                    float(stats.get('win_rate', 0.0)) if stats else None,
+                    _to_nullable_int(stats.get('trade_count')) if stats else None,
+                    _to_nullable_float(stats.get('total_pnl')) if stats else None,
+                    _to_nullable_float(stats.get('win_rate')) if stats else None,
                 ),
             )
 
@@ -276,6 +320,7 @@ def main() -> None:
     monthly = subparsers.add_parser('monthly')
     monthly.add_argument('--optimized-params-json', required=True)
     monthly.add_argument('--summary-by-ticker-csv', required=True)
+    monthly.add_argument('--comparison-csv', default=None)
 
     args = parser.parse_args()
 
@@ -286,7 +331,12 @@ def main() -> None:
         if args.mode == 'daily':
             report = log_daily(conn, Path(args.summary_csv), Path(args.ticker_csv))
         else:
-            report = log_monthly(conn, Path(args.optimized_params_json), Path(args.summary_by_ticker_csv))
+            report = log_monthly(
+                conn,
+                Path(args.optimized_params_json),
+                Path(args.summary_by_ticker_csv),
+                Path(args.comparison_csv) if args.comparison_csv else None,
+            )
     finally:
         conn.close()
 

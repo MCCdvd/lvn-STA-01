@@ -5,9 +5,17 @@ on:
     - cron: '0 8,9 1 * *'
   workflow_dispatch:
 
+concurrency:
+  group: backtest-db-writer
+  cancel-in-progress: false
+
 jobs:
   monthly-optimization:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
+    env:
+      RECIPIENT_EMAIL: ${{ vars.ALERT_EMAIL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,6 +23,10 @@ jobs:
       - name: Validate Rome schedule window (10:00, day 1)
         id: rome_time
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_job=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           rome_hour="$(TZ=Europe/Rome date +%H)"
           rome_day="$(TZ=Europe/Rome date +%d)"
           if [ "$rome_hour" = "10" ] && [ "$rome_day" = "01" ]; then
@@ -30,16 +42,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore SQLite cache
-        if: steps.rome_time.outputs.run_job == 'true'
-        id: db_cache_restore
-        uses: actions/cache/restore@v4
-        with:
-          path: backtest_results.db
-          key: backtest-db-${{ github.run_id }}
-          restore-keys: |
-            backtest-db-
-
       - name: Install dependencies
         if: steps.rome_time.outputs.run_job == 'true'
         run: |
@@ -54,6 +56,10 @@ jobs:
           set -o pipefail
           LOG_FILE="$RUNNER_TEMP/monthly_optimizer.log"
           echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
+          if [ -z "${RECIPIENT_EMAIL:-}" ]; then
+            echo "RECIPIENT_EMAIL is empty. Configure repository variable ALERT_EMAIL."
+            exit 1
+          fi
           for attempt in 1 2 3; do
             echo "Optimizer attempt $attempt/3"
             if python optimizer.py --data-dir . --output-dir output/optimization --optimized-params-file optimized_params.json 2>&1 | tee "$LOG_FILE"; then
@@ -66,7 +72,7 @@ jobs:
       - name: Log optimization to SQLite
         if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
         run: |
-          python scripts/log_results.py --db-path backtest_results.db --report-json output/optimization/monthly_db_report.json monthly --optimized-params-json optimized_params.json --summary-by-ticker-csv output/optimization/per_ticker_best_global/summary_by_ticker.csv
+          python scripts/log_results.py --db-path backtest_results.db --report-json output/optimization/monthly_db_report.json monthly --optimized-params-json optimized_params.json --summary-by-ticker-csv output/optimization/per_ticker_best_global/summary_by_ticker.csv --comparison-csv output/optimization/comparison_baseline_vs_per_ticker.csv
 
       - name: Build success email body
         if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
@@ -78,28 +84,25 @@ jobs:
           with open('optimized_params.json', 'r', encoding='utf-8') as handle:
               params_payload = json.load(handle)
 
-          with open('output/optimization/monthly_db_report.json', 'r', encoding='utf-8') as handle:
-              db_report = json.load(handle)
-
           summary_df = pd.read_csv('output/optimization/per_ticker_best_global/summary_by_ticker.csv').sort_values('total_pnl', ascending=False)
+          comparison_df = pd.read_csv('output/optimization/comparison_baseline_vs_per_ticker.csv')
+          baseline_row = comparison_df[comparison_df['scenario'] == 'baseline_global'].iloc[0]
+          optimized_row = comparison_df[comparison_df['scenario'] == 'per_ticker_best_global'].iloc[0]
+          delta_row = comparison_df[comparison_df['scenario'] == 'delta_optimized_minus_baseline'].iloc[0]
           top = summary_df.head(5)
           bottom = summary_df.tail(5).sort_values('total_pnl', ascending=True)
 
-          previous = db_report.get('previous_total_pnl')
-          if previous is None:
-              comparison_line = 'No previous monthly optimization run found in database.'
-          else:
-              comparison_line = (
-                  f"Old total P&L: {float(previous):.2f} EUR | "
-                  f"New total P&L: {float(db_report['total_pnl']):.2f} EUR | "
-                  f"Delta: {float(db_report['pnl_delta']):.2f} EUR"
-              )
+          comparison_line = (
+              f"Old (baseline) total P&L: {float(baseline_row['total_pnl']):.2f} EUR | "
+              f"New (optimized) total P&L: {float(optimized_row['total_pnl']):.2f} EUR | "
+              f"Delta: {float(delta_row['total_pnl']):.2f} EUR"
+          )
 
           lines = [
               'MONTHLY OPTIMIZATION - SUCCESS',
               '',
               comparison_line,
-              f"Total optimized tickers: {int(db_report['total_tickers'])}",
+              f"Total optimized tickers: {len(summary_df)}",
               '',
               'Top performers:',
           ]
@@ -136,9 +139,22 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           python scripts/send_email.py \
-            --to dmacchiarini@gmail.com \
+            --to "$RECIPIENT_EMAIL" \
             --subject "Monthly Optimization Success - ${{ github.repository }}" \
             --body-file output/optimization/monthly_email.txt
+
+      - name: Persist optimized params and DB
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- optimized_params.json backtest_results.db; then
+            echo "optimized_params.json and backtest_results.db unchanged"
+            exit 0
+          fi
+          git add optimized_params.json backtest_results.db
+          git commit -m "chore: refresh optimized parameters and results database"
+          git push
 
       - name: Build failure email body
         if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome != 'success'
@@ -164,16 +180,9 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           python scripts/send_email.py \
-            --to dmacchiarini@gmail.com \
+            --to "$RECIPIENT_EMAIL" \
             --subject "Monthly Optimization Failure - ${{ github.repository }}" \
             --body-file "$RUNNER_TEMP/monthly_failure_email.txt"
-
-      - name: Save SQLite cache
-        if: steps.rome_time.outputs.run_job == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: backtest_results.db
-          key: backtest-db-${{ github.run_id }}
 
       - name: Upload run artifacts
         if: steps.rome_time.outputs.run_job == 'true'
