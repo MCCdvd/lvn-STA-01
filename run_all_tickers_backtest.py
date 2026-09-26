@@ -77,6 +77,8 @@ def _load_json(path: str) -> Any:
 
 
 def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
+    required_keys = {"window_profile", "price_tolerance", "lvn_threshold"}
+
     def _normalize_row(row: Any) -> Dict[str, Any]:
         if not isinstance(row, dict):
             return {}
@@ -85,6 +87,16 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
             normalized["params"] = row["parameters"]
             return normalized
         return row
+
+    def _looks_like_ticker_row(row: Any) -> bool:
+        if not isinstance(row, dict):
+            return False
+        if required_keys.issubset(row.keys()):
+            return True
+        nested = row.get("params")
+        if not isinstance(nested, dict):
+            nested = row.get("parameters")
+        return isinstance(nested, dict) and required_keys.issubset(nested.keys())
 
     if isinstance(payload, dict):
         if "tickers" in payload:
@@ -104,7 +116,7 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
 
         rows = []
         for key, value in payload.items():
-            if isinstance(value, dict):
+            if _looks_like_ticker_row(value):
                 rows.append((str(key), _normalize_row(value)))
         if rows:
             return rows
