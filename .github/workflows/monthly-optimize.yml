@@ -1,0 +1,200 @@
+name: Monthly Optimization
+
+on:
+  schedule:
+    - cron: '0 8,9 1 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: backtest-db-writer
+  cancel-in-progress: false
+
+jobs:
+  monthly-optimization:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      RECIPIENT_EMAIL: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Rome schedule window (10:00, day 1)
+        id: rome_time
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_job=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rome_hour="$(TZ=Europe/Rome date +%H)"
+          rome_day="$(TZ=Europe/Rome date +%d)"
+          if [ "$rome_hour" = "10" ] && [ "$rome_day" = "01" ]; then
+            echo "run_job=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_job=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping run: Rome day/hour is $rome_day/$rome_hour"
+          fi
+
+      - name: Set up Python
+        if: steps.rome_time.outputs.run_job == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        if: steps.rome_time.outputs.run_job == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scipy
+
+      - name: Run optimizer with retry
+        if: steps.rome_time.outputs.run_job == 'true'
+        id: run_optimizer
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/monthly_optimizer.log"
+          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
+          if [ -z "${RECIPIENT_EMAIL:-}" ]; then
+            echo "RECIPIENT_EMAIL is empty. Configure repository variable ALERT_EMAIL."
+            exit 1
+          fi
+          for attempt in 1 2 3; do
+            echo "Optimizer attempt $attempt/3"
+            if python optimizer.py --data-dir . --output-dir output/optimization --optimized-params-file optimized_params.json 2>&1 | tee "$LOG_FILE"; then
+              exit 0
+            fi
+            sleep 20
+          done
+          exit 1
+
+      - name: Log optimization to SQLite
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
+        run: |
+          python scripts/log_results.py --db-path backtest_results.db --report-json output/optimization/monthly_db_report.json monthly --optimized-params-json optimized_params.json --summary-by-ticker-csv output/optimization/per_ticker_best_global/summary_by_ticker.csv --comparison-csv output/optimization/comparison_baseline_vs_per_ticker.csv
+
+      - name: Build success email body
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import json
+          import pandas as pd
+
+          with open('optimized_params.json', 'r', encoding='utf-8') as handle:
+              params_payload = json.load(handle)
+
+          summary_df = pd.read_csv('output/optimization/per_ticker_best_global/summary_by_ticker.csv').sort_values('total_pnl', ascending=False)
+          comparison_df = pd.read_csv('output/optimization/comparison_baseline_vs_per_ticker.csv')
+          baseline_row = comparison_df[comparison_df['scenario'] == 'baseline_global'].iloc[0]
+          optimized_row = comparison_df[comparison_df['scenario'] == 'per_ticker_best_global'].iloc[0]
+          delta_row = comparison_df[comparison_df['scenario'] == 'delta_optimized_minus_baseline'].iloc[0]
+          top = summary_df.head(5)
+          bottom = summary_df.tail(5).sort_values('total_pnl', ascending=True)
+
+          comparison_line = (
+              f"Old (baseline) total P&L: {float(baseline_row['total_pnl']):.2f} EUR | "
+              f"New (optimized) total P&L: {float(optimized_row['total_pnl']):.2f} EUR | "
+              f"Delta: {float(delta_row['total_pnl']):.2f} EUR"
+          )
+
+          lines = [
+              'MONTHLY OPTIMIZATION - SUCCESS',
+              '',
+              comparison_line,
+              f"Total optimized tickers: {len(summary_df)}",
+              '',
+              'Top performers:',
+          ]
+
+          for row in top.itertuples(index=False):
+              lines.append(
+                  f"- {row.ticker}: pnl={float(row.total_pnl):.2f} EUR, trades={int(row.trade_count)}, win_rate={float(row.win_rate):.2f}%"
+              )
+
+          lines.extend(['', 'Bottom performers:'])
+          for row in bottom.itertuples(index=False):
+              lines.append(
+                  f"- {row.ticker}: pnl={float(row.total_pnl):.2f} EUR, trades={int(row.trade_count)}, win_rate={float(row.win_rate):.2f}%"
+              )
+
+          lines.extend(['', 'New optimized parameters summary:'])
+          ticker_payload = params_payload.get('tickers', {})
+          for ticker in sorted(ticker_payload.keys()):
+              params = ticker_payload[ticker].get('params', ticker_payload[ticker])
+              lines.append(
+                  f"- {ticker}: window_profile={int(params['window_profile'])}, "
+                  f"price_tolerance={float(params['price_tolerance'])}, "
+                  f"lvn_threshold={float(params['lvn_threshold'])}"
+              )
+
+          with open('output/optimization/monthly_email.txt', 'w', encoding='utf-8') as handle:
+              handle.write('\n'.join(lines))
+          PY
+
+      - name: Send success email
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python scripts/send_email.py \
+            --to "$RECIPIENT_EMAIL" \
+            --subject "Monthly Optimization Success - ${{ github.repository }}" \
+            --body-file output/optimization/monthly_email.txt
+
+      - name: Persist optimized params and DB
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- optimized_params.json backtest_results.db; then
+            echo "optimized_params.json and backtest_results.db unchanged"
+            exit 0
+          fi
+          git add optimized_params.json backtest_results.db
+          git commit -m "chore: refresh optimized parameters and results database"
+          git push
+
+      - name: Build failure email body
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome != 'success'
+        run: |
+          {
+            echo "MONTHLY OPTIMIZATION - FAILURE"
+            echo
+            echo "Repository: ${{ github.repository }}"
+            echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "Stack trace / logs:"
+            if [ -n "${LOG_FILE:-}" ] && [ -f "$LOG_FILE" ]; then
+              tail -n 400 "$LOG_FILE"
+            else
+              echo "Log file not available"
+            fi
+          } > "$RUNNER_TEMP/monthly_failure_email.txt"
+
+      - name: Send failure email
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome != 'success'
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python scripts/send_email.py \
+            --to "$RECIPIENT_EMAIL" \
+            --subject "Monthly Optimization Failure - ${{ github.repository }}" \
+            --body-file "$RUNNER_TEMP/monthly_failure_email.txt"
+
+      - name: Upload run artifacts
+        if: steps.rome_time.outputs.run_job == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-optimization-${{ github.run_id }}
+          path: |
+            output/optimization
+            optimized_params.json
+            backtest_results.db
+          if-no-files-found: warn
+
+      - name: Mark workflow as failed after alert
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_optimizer.outcome != 'success'
+        run: exit 1
