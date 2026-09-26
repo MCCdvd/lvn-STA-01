@@ -124,7 +124,7 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
     if isinstance(payload, list):
         rows = []
         for row in payload:
-            if isinstance(row, dict) and row.get("ticker"):
+            if isinstance(row, dict) and row.get("ticker") and _looks_like_ticker_row(row):
                 rows.append((str(row["ticker"]), _normalize_row(row)))
         return rows
     return []
