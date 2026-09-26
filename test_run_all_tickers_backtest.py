@@ -1,5 +1,8 @@
 import importlib
+import json
+import os
 import sys
+import tempfile
 import types
 import unittest
 from dataclasses import dataclass
@@ -89,6 +92,33 @@ class IterTickerPayloadTests(unittest.TestCase):
         payload = {"BFF": {"window_profile": None, "price_tolerance": 0.15, "lvn_threshold": 0.25}}
         rows = self.mod._iter_ticker_payloads(payload)
         self.assertEqual(rows, [])
+
+    def test_parse_specs_nested_null_optional_ints_use_defaults(self):
+        payload = {
+            "tickers": {
+                "BFF": {
+                    "parameters": {
+                        "window_profile": 12,
+                        "price_tolerance": 0.15,
+                        "lvn_threshold": 0.25,
+                        "min_profile_levels": None,
+                        "rsi_period": None,
+                    }
+                }
+            }
+        }
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
+            json.dump(payload, handle)
+            path = handle.name
+        try:
+            specs, invalid = self.mod._parse_specs(path)
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(len(invalid), 0)
+        self.assertEqual(len(specs), 1)
+        self.assertEqual(specs[0].params.min_profile_levels, 10)
+        self.assertEqual(specs[0].params.rsi_period, 14)
 
 
 if __name__ == "__main__":

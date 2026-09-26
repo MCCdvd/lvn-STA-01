@@ -171,8 +171,8 @@ def _parse_specs(optimized_params_path: str) -> Tuple[List[TickerRunSpec], List[
                 price_tolerance=float(price_tolerance),
                 lvn_threshold=float(lvn_threshold),
                 bin_step=_safe_float(source.get("bin_step"), CONFIG.strategy.bin_step),
-                min_profile_levels=int(source.get("min_profile_levels", CONFIG.strategy.min_profile_levels)),
-                rsi_period=int(source.get("rsi_period", CONFIG.strategy.rsi_period)),
+                min_profile_levels=_safe_int(source.get("min_profile_levels"), CONFIG.strategy.min_profile_levels),
+                rsi_period=_safe_int(source.get("rsi_period"), CONFIG.strategy.rsi_period),
                 rsi_long_max=_safe_float(source.get("rsi_long_max"), CONFIG.strategy.rsi_long_max),
                 rsi_short_min=_safe_float(source.get("rsi_short_min"), CONFIG.strategy.rsi_short_min),
             )
