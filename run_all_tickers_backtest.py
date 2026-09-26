@@ -63,6 +63,14 @@ def _safe_float(value: Any, default: float) -> float:
     return number
 
 
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return number
+
+
 def _load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -124,20 +132,51 @@ def _parse_specs(optimized_params_path: str) -> Tuple[List[TickerRunSpec], List[
             )
             continue
 
-        params = StrategyParams(
-            window_profile=int(window_profile),
-            price_tolerance=float(price_tolerance),
-            lvn_threshold=float(lvn_threshold),
-            bin_step=_safe_float(source.get("bin_step"), CONFIG.strategy.bin_step),
-            min_profile_levels=int(source.get("min_profile_levels", CONFIG.strategy.min_profile_levels)),
-            rsi_period=int(source.get("rsi_period", CONFIG.strategy.rsi_period)),
-            rsi_long_max=_safe_float(source.get("rsi_long_max"), CONFIG.strategy.rsi_long_max),
-            rsi_short_min=_safe_float(source.get("rsi_short_min"), CONFIG.strategy.rsi_short_min),
-        )
+        try:
+            params = StrategyParams(
+                window_profile=int(window_profile),
+                price_tolerance=float(price_tolerance),
+                lvn_threshold=float(lvn_threshold),
+                bin_step=_safe_float(source.get("bin_step"), CONFIG.strategy.bin_step),
+                min_profile_levels=int(source.get("min_profile_levels", CONFIG.strategy.min_profile_levels)),
+                rsi_period=int(source.get("rsi_period", CONFIG.strategy.rsi_period)),
+                rsi_long_max=_safe_float(source.get("rsi_long_max"), CONFIG.strategy.rsi_long_max),
+                rsi_short_min=_safe_float(source.get("rsi_short_min"), CONFIG.strategy.rsi_short_min),
+            )
+        except (TypeError, ValueError) as exc:
+            invalid.append(
+                TickerBacktestResult(
+                    ticker=ticker,
+                    status="ERROR",
+                    trade_count=0,
+                    total_pnl=0.0,
+                    win_rate=0.0,
+                    profit_factor=0.0,
+                    max_drawdown=0.0,
+                    error=f"Invalid optimized params value: {exc}",
+                    elapsed_seconds=0.0,
+                )
+            )
+            continue
         specs.append(TickerRunSpec(ticker=ticker, params=params))
 
     deduped: Dict[str, TickerRunSpec] = {}
     for spec in specs:
+        if spec.ticker in deduped:
+            invalid.append(
+                TickerBacktestResult(
+                    ticker=spec.ticker,
+                    status="ERROR",
+                    trade_count=0,
+                    total_pnl=0.0,
+                    win_rate=0.0,
+                    profit_factor=0.0,
+                    max_drawdown=0.0,
+                    error="Duplicate ticker found in optimized params file",
+                    elapsed_seconds=0.0,
+                )
+            )
+            continue
         deduped[spec.ticker] = spec
 
     return sorted(deduped.values(), key=lambda item: item.ticker), invalid
@@ -189,15 +228,15 @@ def _run_single_ticker(spec: TickerRunSpec, data_dir: str, output_dir: str) -> T
         max_drawdown = 0.0
     else:
         row = summary_by_ticker_df.iloc[0]
-        trade_count = int(row["trade_count"])
-        total_pnl = round(float(row["total_pnl"]), 2)
-        win_rate = round(float(row["win_rate"]), 2)
-        profit_factor = float(row["profit_factor"])
-        max_drawdown = round(float(row["max_drawdown"]), 2)
+        trade_count = _safe_int(row.get("trade_count"), 0)
+        total_pnl = round(_safe_float(row.get("total_pnl"), 0.0), 2)
+        win_rate = round(_safe_float(row.get("win_rate"), 0.0), 2)
+        profit_factor = _safe_float(row.get("profit_factor"), 0.0)
+        max_drawdown = round(_safe_float(row.get("max_drawdown"), 0.0), 2)
 
     return TickerBacktestResult(
         ticker=spec.ticker,
-        status="DONE",
+        status="DONE" if trade_count > 0 else "DONE_NO_TRADES",
         trade_count=trade_count,
         total_pnl=total_pnl,
         win_rate=win_rate,
@@ -208,12 +247,15 @@ def _run_single_ticker(spec: TickerRunSpec, data_dir: str, output_dir: str) -> T
     )
 
 
-def _execute_all(specs: List[TickerRunSpec], data_dir: str, output_dir: str, parallel: bool) -> List[TickerBacktestResult]:
+def _execute_all(specs: List[TickerRunSpec], data_dir: str, output_dir: str, parallel: bool, max_workers: int | None) -> List[TickerBacktestResult]:
     results: List[TickerBacktestResult] = []
     total = len(specs)
 
     if parallel and total > 1:
-        workers = min(total, os.cpu_count() or 1)
+        cpu_workers = os.cpu_count() or 1
+        default_workers = min(cpu_workers, 4)
+        configured_workers = max_workers if max_workers is not None else default_workers
+        workers = max(1, min(total, configured_workers))
         with ProcessPoolExecutor(max_workers=workers) as executor:
             future_map = {executor.submit(_run_single_ticker, spec, data_dir, output_dir): spec for spec in specs}
             done = 0
@@ -269,6 +311,13 @@ def _execute_all(specs: List[TickerRunSpec], data_dir: str, output_dir: str, par
 
 
 def _save_batch_outputs(output_dir: str, results: List[TickerBacktestResult], elapsed_seconds: float) -> None:
+    result_df = _results_to_dataframe(results)
+    result_df.to_csv(os.path.join(output_dir, "ticker_results.csv"), index=False)
+    aggregate = _build_aggregate_summary(result_df, elapsed_seconds)
+    pd.DataFrame([aggregate]).to_csv(os.path.join(output_dir, "batch_summary.csv"), index=False)
+
+
+def _results_to_dataframe(results: List[TickerBacktestResult]) -> pd.DataFrame:
     rows = [
         {
             "ticker": result.ticker,
@@ -283,49 +332,53 @@ def _save_batch_outputs(output_dir: str, results: List[TickerBacktestResult], el
         }
         for result in results
     ]
-    result_df = pd.DataFrame(rows)
-    result_df.to_csv(os.path.join(output_dir, "ticker_results.csv"), index=False)
+    return pd.DataFrame(rows)
 
+
+def _build_aggregate_summary(result_df: pd.DataFrame, elapsed_seconds: float) -> Dict[str, Any]:
+    completed_df = result_df[result_df["status"].isin(["DONE", "DONE_NO_TRADES"])].copy()
     success_df = result_df[result_df["status"] == "DONE"].copy()
-    if success_df.empty:
-        aggregate = {
-            "total_tickers_processed": len(results),
+    no_trade_df = result_df[result_df["status"] == "DONE_NO_TRADES"].copy()
+    failed_df = result_df[result_df["status"] == "ERROR"].copy()
+    if completed_df.empty:
+        return {
+            "total_tickers_processed": int(len(result_df)),
             "success_count": 0,
-            "failed_count": len(results),
+            "completed_count": int(len(completed_df)),
+            "no_trade_count": int(len(no_trade_df)),
+            "failed_count": int(len(failed_df)),
             "execution_seconds": round(elapsed_seconds, 2),
             "total_trades": 0,
             "total_pnl": 0.0,
             "average_win_rate": 0.0,
             "average_profit_factor": 0.0,
-            "total_max_drawdown": 0.0,
+            "sum_max_drawdown": 0.0,
         }
-    else:
-        finite_profit_factor = success_df["profit_factor"].replace([float("inf"), float("-inf")], pd.NA).dropna()
-        aggregate = {
-            "total_tickers_processed": len(results),
-            "success_count": int(len(success_df)),
-            "failed_count": int(len(results) - len(success_df)),
-            "execution_seconds": round(elapsed_seconds, 2),
-            "total_trades": int(success_df["trade_count"].sum()),
-            "total_pnl": round(float(success_df["total_pnl"].sum()), 2),
-            "average_win_rate": round(float(success_df["win_rate"].mean()), 2),
-            "average_profit_factor": round(float(finite_profit_factor.mean()), 2) if not finite_profit_factor.empty else 0.0,
-            "total_max_drawdown": round(float(success_df["max_drawdown"].sum()), 2),
-        }
-    pd.DataFrame([aggregate]).to_csv(os.path.join(output_dir, "batch_summary.csv"), index=False)
+    finite_profit_factor = success_df.loc[
+        ~success_df["profit_factor"].isin([float("inf"), float("-inf")]),
+        "profit_factor",
+    ].dropna()
+    win_rate_series = success_df["win_rate"].dropna()
+    return {
+        "total_tickers_processed": int(len(result_df)),
+        "success_count": int(len(success_df)),
+        "completed_count": int(len(completed_df)),
+        "no_trade_count": int(len(no_trade_df)),
+        "failed_count": int(len(failed_df)),
+        "execution_seconds": round(elapsed_seconds, 2),
+        "total_trades": int(success_df["trade_count"].sum()),
+        "total_pnl": round(float(success_df["total_pnl"].sum()), 2),
+        "average_win_rate": round(float(win_rate_series.mean()), 2) if not win_rate_series.empty else 0.0,
+        "average_profit_factor": round(float(finite_profit_factor.mean()), 2) if not finite_profit_factor.empty else 0.0,
+        "sum_max_drawdown": round(float(success_df["max_drawdown"].sum()), 2),
+    }
 
 
 def _print_final_summary(output_dir: str, results: List[TickerBacktestResult], elapsed_seconds: float) -> None:
+    result_df = _results_to_dataframe(results)
+    aggregate = _build_aggregate_summary(result_df, elapsed_seconds)
     success = [item for item in results if item.status == "DONE"]
-    failed = [item for item in results if item.status != "DONE"]
-
-    total_trades = sum(item.trade_count for item in success)
-    total_pnl = round(sum(item.total_pnl for item in success), 2)
-    average_win_rate = round((sum(item.win_rate for item in success) / len(success)), 2) if success else 0.0
-
-    finite_pf = [item.profit_factor for item in success if not math.isinf(item.profit_factor)]
-    average_profit_factor = round(sum(finite_pf) / len(finite_pf), 2) if finite_pf else 0.0
-    total_max_drawdown = round(sum(item.max_drawdown for item in success), 2)
+    failed = [item for item in results if item.status == "ERROR"]
 
     ranked = sorted(success, key=lambda item: item.total_pnl, reverse=True)
     top = ranked[:5]
@@ -333,21 +386,26 @@ def _print_final_summary(output_dir: str, results: List[TickerBacktestResult], e
 
     print("\n📊 BATCH BACKTEST SUMMARY")
     print("═════════════════════════")
-    print(f"Total tickers processed: {len(results)}")
-    print(f"Successfully completed: {len(success)}")
-    print(f"Failed: {len(failed)}")
+    print(f"Total tickers processed: {aggregate['total_tickers_processed']}")
+    print(f"Successfully completed: {aggregate['success_count']}")
+    print(f"Completed with no trades: {aggregate['no_trade_count']}")
+    print(f"Failed: {aggregate['failed_count']}")
     print(f"Execution time: {_format_duration(elapsed_seconds)}")
 
     print("\n💰 AGGREGATE RESULTS")
-    print(f"Total trades: {total_trades}")
-    print(f"Total P&L: €{total_pnl:,.2f}")
-    print(f"Average win rate: {average_win_rate:.2f}%")
-    print(f"Average profit factor: {average_profit_factor:.2f}")
-    print(f"Total max drawdown: €{total_max_drawdown:,.2f}")
+    print(f"Total trades: {aggregate['total_trades']}")
+    print(f"Total P&L: €{aggregate['total_pnl']:,.2f}")
+    print(f"Average win rate: {aggregate['average_win_rate']:.2f}%")
+    print(f"Average profit factor: {aggregate['average_profit_factor']:.2f}")
+    print(f"Sum of max drawdowns: €{aggregate['sum_max_drawdown']:,.2f}")
 
-    print("\n🏆 TOP 5 TICKERS")
-    for index, result in enumerate(top, start=1):
-        print(f"{index}. {result.ticker}: €{result.total_pnl:,.2f} ({result.trade_count} trades)")
+    if top:
+        print("\n🏆 TOP 5 TICKERS")
+        for index, result in enumerate(top, start=1):
+            print(f"{index}. {result.ticker}: €{result.total_pnl:,.2f} ({result.trade_count} trades)")
+    else:
+        print("\n🏆 TOP 5 TICKERS")
+        print("No completed tickers with trades.")
 
     if bottom:
         print("\n❌ BOTTOM 2 TICKERS")
@@ -368,7 +426,10 @@ def main() -> None:
     parser.add_argument("--data-dir", default=".", help="Directory containing <TICKER>.csv data files")
     parser.add_argument("--output-dir", required=True, help="Directory where batch outputs will be written")
     parser.add_argument("--parallel", action="store_true", help="Execute tickers in parallel")
+    parser.add_argument("--max-workers", type=int, default=None, help="Maximum workers for --parallel mode")
     args = parser.parse_args()
+    if args.max_workers is not None and args.max_workers <= 0:
+        parser.error("--max-workers must be greater than 0")
 
     started = time.perf_counter()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -382,7 +443,7 @@ def main() -> None:
         for item in invalid:
             print(f"⚠️  Backtest {item.ticker}... ERROR - {item.error}")
 
-    results = invalid + _execute_all(specs, args.data_dir, args.output_dir, args.parallel)
+    results = invalid + _execute_all(specs, args.data_dir, args.output_dir, args.parallel, args.max_workers)
     elapsed_seconds = time.perf_counter() - started
 
     _save_batch_outputs(args.output_dir, results, elapsed_seconds)

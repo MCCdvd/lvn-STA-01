@@ -21,10 +21,13 @@ Workspace standalone per ottimizzare e validare parametri LVN **su ciascun titol
 1. Backtest singolo ticker
 
 ```bash
-python /home/runner/work/LVN-Sentinel/LVN-Sentinel/single_ticker_analysis/backtest.py --ticker UCG
+python backtest.py --ticker UCG
 ```
 
 2. Backtest batch su tutti i ticker (parametri ottimizzati)
 
 ```bash
-python run_all_tickers_backtest.py --optimized-params optimized_params.json --output-dir output/production
+python run_all_tickers_backtest.py --optimized-params optimized_params.json --data-dir . --output-dir output/production
+```
+
+`--data-dir` deve puntare alla cartella che contiene i file `<TICKER>.csv`.
