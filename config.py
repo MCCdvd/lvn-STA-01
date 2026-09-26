@@ -19,14 +19,14 @@ class StrategyConfig:
     investimento_per_trade: float = 10000.0
     commissione_apertura: float = 10.0
     commissione_chiusura: float = 10.0
-    window_profile: int = 25
-    price_tolerance: float = 0.05
-    lvn_threshold: float = 0.50
+    window_profile: int = 10
+    price_tolerance: float = 0.50
+    lvn_threshold: float = 0.10
     bin_step: float = 0.05
-    min_profile_levels: int = 5
+    min_profile_levels: int = 2
     rsi_period: int = 14
-    rsi_long_max: float = 35.0
-    rsi_short_min: float = 65.0
+    rsi_long_max: float = 70.0
+    rsi_short_min: float = 30.0
 
 
 @dataclass(frozen=True)
