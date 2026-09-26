@@ -11,7 +11,6 @@ import pandas as pd
 
 def _row_to_payload(row: pd.Series) -> Dict:
     return {
-        "ticker": str(row["ticker"]),
         "parameters": {
             "window_profile": int(row["window_profile"]),
             "price_tolerance": float(row["price_tolerance"]),
