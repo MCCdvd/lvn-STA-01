@@ -9,6 +9,7 @@ import pandas as pd
 
 from config import CONFIG
 from engine import StrategyParams, safe_read_csv, signal_for_index
+from production_handler import DEFAULT_OPTIMIZED_PARAMS_PATH, OptimizedParams, get_optimized_params_loader
 
 
 @dataclass
@@ -195,14 +196,17 @@ def build_summaries(trades_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
     return summary_by_ticker, summary_global
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Backtest single ticker analysis")
-    parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
-    parser.add_argument("--ticker", required=True)
-    parser.add_argument("--output-dir", default=CONFIG.runtime.output_dir)
-    args = parser.parse_args()
+def _parse_bool(raw: str) -> bool:
+    lowered = str(raw).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {raw}")
 
-    params = StrategyParams(
+
+def _build_default_params() -> StrategyParams:
+    return StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
         price_tolerance=CONFIG.strategy.price_tolerance,
         lvn_threshold=CONFIG.strategy.lvn_threshold,
@@ -212,6 +216,78 @@ def main() -> None:
         rsi_long_max=CONFIG.strategy.rsi_long_max,
         rsi_short_min=CONFIG.strategy.rsi_short_min,
     )
+
+
+def _build_strategy_params(optimized: OptimizedParams) -> StrategyParams:
+    return StrategyParams(
+        window_profile=optimized.window_profile,
+        price_tolerance=optimized.price_tolerance,
+        lvn_threshold=optimized.lvn_threshold,
+        bin_step=CONFIG.strategy.bin_step,
+        min_profile_levels=CONFIG.strategy.min_profile_levels,
+        rsi_period=CONFIG.strategy.rsi_period,
+        rsi_long_max=CONFIG.strategy.rsi_long_max,
+        rsi_short_min=CONFIG.strategy.rsi_short_min,
+    )
+
+
+def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_params_path: str) -> Tuple[StrategyParams, Optional[OptimizedParams]]:
+    if not use_optimized:
+        return _build_default_params(), None
+
+    loader = get_optimized_params_loader(optimized_params_path, force_reload=True)
+    optimized = loader.get_ticker_params(ticker)
+    if optimized is None:
+        return _build_default_params(), None
+    return _build_strategy_params(optimized), optimized
+
+
+def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optional[OptimizedParams], optimized_params_path: str, use_optimized: bool) -> None:
+    if optimized is not None:
+        print(f"Usando parametri ottimizzati per {ticker} da: {optimized_params_path}")
+        print(
+            "Statistiche ottimizzazione: "
+            f"trade={optimized.metrics.trade_count}, "
+            f"pnl={optimized.metrics.total_pnl:.2f}, "
+            f"win_rate={optimized.metrics.win_rate:.2f}%, "
+            f"profit_factor={optimized.metrics.profit_factor:.4f}, "
+            f"max_drawdown={optimized.metrics.max_drawdown:.2f}"
+        )
+    elif use_optimized:
+        print(f"Parametri ottimizzati non disponibili per {ticker}, uso i default.")
+    else:
+        print(f"Uso parametri di default per {ticker}.")
+
+    print(
+        "Parametri strategia: "
+        f"window_profile={params.window_profile}, "
+        f"price_tolerance={params.price_tolerance}, "
+        f"lvn_threshold={params.lvn_threshold}"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Backtest single ticker analysis")
+    parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
+    parser.add_argument("--ticker", required=True)
+    parser.add_argument("--output-dir", default=CONFIG.runtime.output_dir)
+    parser.add_argument(
+        "--use-optimized",
+        nargs="?",
+        const=True,
+        default=True,
+        type=_parse_bool,
+        help="Use optimized parameters when available (default: true)",
+    )
+    parser.add_argument(
+        "--optimized-params",
+        default=str(DEFAULT_OPTIMIZED_PARAMS_PATH),
+        help="Path to optimized parameters JSON file",
+    )
+    args = parser.parse_args()
+
+    params, optimized = _resolve_params_for_ticker(args.ticker, args.use_optimized, args.optimized_params)
+    _print_selected_params(args.ticker, params, optimized, args.optimized_params, args.use_optimized)
 
     trades_df = run_backtest_for_ticker(
         data_dir=args.data_dir,
