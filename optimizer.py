@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import json
 import os
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import pandas as pd
@@ -92,6 +94,37 @@ def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.
     return pd.DataFrame(rows)
 
 
+def _save_optimized_params_json(best_params_rows: List[Dict], output_file: str) -> None:
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "tickers": {},
+    }
+    for row in best_params_rows:
+        ticker = str(row["ticker"])
+        payload["tickers"][ticker] = {
+            "params": {
+                "window_profile": int(row["window_profile"]),
+                "price_tolerance": float(row["price_tolerance"]),
+                "lvn_threshold": float(row["lvn_threshold"]),
+                "bin_step": float(CONFIG.strategy.bin_step),
+                "min_profile_levels": int(CONFIG.strategy.min_profile_levels),
+                "rsi_period": int(CONFIG.strategy.rsi_period),
+                "rsi_long_max": float(CONFIG.strategy.rsi_long_max),
+                "rsi_short_min": float(CONFIG.strategy.rsi_short_min),
+            },
+            "metrics": {
+                "trade_count": int(row.get("trade_count", 0)),
+                "total_pnl": float(row.get("total_pnl", 0.0)),
+                "win_rate": float(row.get("win_rate", 0.0)),
+                "profit_factor": float(row.get("profit_factor", 0.0)),
+                "max_drawdown": float(row.get("max_drawdown", 0.0)),
+            },
+        }
+
+    with open(output_file, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Single ticker optimizer + baseline comparison")
     parser.add_argument("--data-dir", default=CONFIG.runtime.data_dir)
@@ -101,6 +134,7 @@ def main() -> None:
     parser.add_argument("--price-tolerances", default=",".join(map(str, CONFIG.grid.price_tolerances)))
     parser.add_argument("--lvn-thresholds", default=",".join(map(str, CONFIG.grid.lvn_thresholds)))
     parser.add_argument("--top-n", type=int, default=CONFIG.grid.top_n)
+    parser.add_argument("--optimized-params-file", default="optimized_params.json")
     args = parser.parse_args()
 
     tickers = args.tickers if args.tickers else _discover_tickers(args.data_dir)
@@ -219,6 +253,7 @@ def main() -> None:
         ]
     )
     comparison.to_csv(os.path.join(args.output_dir, "comparison_baseline_vs_per_ticker.csv"), index=False)
+    _save_optimized_params_json(best_params_rows, args.optimized_params_file)
     print(f"Ottimizzazione completata. Output: {args.output_dir}")
 
 

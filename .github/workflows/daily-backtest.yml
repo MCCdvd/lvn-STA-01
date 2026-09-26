@@ -1,0 +1,165 @@
+name: Daily Backtest
+
+on:
+  schedule:
+    - cron: '0 6,7 * * *'
+  workflow_dispatch:
+
+jobs:
+  daily-backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Rome schedule window (08:00)
+        id: rome_time
+        run: |
+          rome_hour="$(TZ=Europe/Rome date +%H)"
+          if [ "$rome_hour" = "08" ]; then
+            echo "run_job=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_job=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping run: Rome hour is $rome_hour"
+          fi
+
+      - name: Set up Python
+        if: steps.rome_time.outputs.run_job == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore SQLite cache
+        if: steps.rome_time.outputs.run_job == 'true'
+        id: db_cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: backtest_results.db
+          key: backtest-db-${{ github.run_id }}
+          restore-keys: |
+            backtest-db-
+
+      - name: Install dependencies
+        if: steps.rome_time.outputs.run_job == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scipy
+
+      - name: Ensure optimized params exist
+        if: steps.rome_time.outputs.run_job == 'true'
+        run: |
+          if [ ! -f optimized_params.json ]; then
+            echo "optimized_params.json not found, generating it via optimizer.py"
+            python optimizer.py --data-dir . --output-dir output/optimization --optimized-params-file optimized_params.json
+          fi
+
+      - name: Run daily backtest with retry
+        if: steps.rome_time.outputs.run_job == 'true'
+        id: run_backtest
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/daily_backtest.log"
+          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
+          for attempt in 1 2 3; do
+            echo "Backtest attempt $attempt/3"
+            if python run_all_tickers_backtest.py --optimized-params optimized_params.json --data-dir . --output-dir output/production --parallel --max-workers 4 2>&1 | tee "$LOG_FILE"; then
+              exit 0
+            fi
+            sleep 15
+          done
+          exit 1
+
+      - name: Log backtest to SQLite
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome == 'success'
+        run: |
+          python scripts/log_results.py --db-path backtest_results.db --report-json output/production/daily_db_report.json daily --summary-csv output/production/batch_summary.csv --ticker-csv output/production/ticker_results.csv
+
+      - name: Build success email body
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          ticker_df = pd.read_csv('output/production/ticker_results.csv').sort_values('total_pnl', ascending=False)
+          summary = pd.read_csv('output/production/batch_summary.csv').iloc[0]
+
+          lines = [
+              'DAILY BACKTEST - SUCCESS',
+              '',
+              f"Execution time: {summary['execution_seconds']} seconds",
+              f"Total tickers: {int(summary['total_tickers'])}",
+              f"Total trades: {int(summary['total_trades'])}",
+              f"Total P&L: {float(summary['total_pnl']):.2f} EUR",
+              '',
+              'Ticker performance (best to worst):',
+          ]
+
+          for row in ticker_df.itertuples(index=False):
+              lines.append(
+                  f"- {row.ticker}: status={row.status}, trades={int(row.trade_count)}, pnl={float(row.total_pnl):.2f} EUR, win_rate={float(row.win_rate):.2f}%"
+              )
+
+          with open('output/production/daily_email.txt', 'w', encoding='utf-8') as handle:
+              handle.write('\n'.join(lines))
+          PY
+
+      - name: Send success email
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome == 'success'
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python scripts/send_email.py \
+            --to dmacchiarini@gmail.com \
+            --subject "Daily Backtest Success - ${{ github.repository }}" \
+            --body-file output/production/daily_email.txt
+
+      - name: Build failure email body
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome != 'success'
+        run: |
+          {
+            echo "DAILY BACKTEST - FAILURE"
+            echo
+            echo "Repository: ${{ github.repository }}"
+            echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "Stack trace / logs:"
+            if [ -n "${LOG_FILE:-}" ] && [ -f "$LOG_FILE" ]; then
+              tail -n 400 "$LOG_FILE"
+            else
+              echo "Log file not available"
+            fi
+          } > "$RUNNER_TEMP/daily_failure_email.txt"
+
+      - name: Send failure email
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome != 'success'
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python scripts/send_email.py \
+            --to dmacchiarini@gmail.com \
+            --subject "Daily Backtest Failure - ${{ github.repository }}" \
+            --body-file "$RUNNER_TEMP/daily_failure_email.txt"
+
+      - name: Save SQLite cache
+        if: steps.rome_time.outputs.run_job == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: backtest_results.db
+          key: backtest-db-${{ github.run_id }}
+
+      - name: Upload run artifacts
+        if: steps.rome_time.outputs.run_job == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-backtest-${{ github.run_id }}
+          path: |
+            output/production
+            backtest_results.db
+          if-no-files-found: warn
+
+      - name: Mark workflow as failed after alert
+        if: steps.rome_time.outputs.run_job == 'true' && steps.run_backtest.outcome != 'success'
+        run: exit 1
