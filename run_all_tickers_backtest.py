@@ -79,6 +79,9 @@ def _load_json(path: str) -> Any:
 def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
     required_keys = {"window_profile", "price_tolerance", "lvn_threshold"}
 
+    def _has_required_values(row: Dict[str, Any]) -> bool:
+        return all(row.get(key) is not None for key in required_keys)
+
     def _normalize_row(row: Any) -> Dict[str, Any]:
         if not isinstance(row, dict):
             return {}
@@ -91,12 +94,13 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
     def _looks_like_ticker_row(row: Any) -> bool:
         if not isinstance(row, dict):
             return False
-        if required_keys.issubset(row.keys()):
+        nested_params = row.get("params")
+        if isinstance(nested_params, dict) and _has_required_values(nested_params):
             return True
-        nested = row.get("params")
-        if not isinstance(nested, dict):
-            nested = row.get("parameters")
-        return isinstance(nested, dict) and required_keys.issubset(nested.keys())
+        nested_parameters = row.get("parameters")
+        if isinstance(nested_parameters, dict) and _has_required_values(nested_parameters):
+            return True
+        return _has_required_values(row)
 
     if isinstance(payload, dict):
         if "tickers" in payload:
@@ -112,7 +116,7 @@ def _iter_ticker_payloads(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
                     if isinstance(row, dict) and row.get("ticker") and _looks_like_ticker_row(row):
                         rows.append((str(row["ticker"]), _normalize_row(row)))
                 return rows
-            return []
+            raise ValueError("Invalid optimized params format: 'tickers' must be a dict or list")
 
         rows = []
         for key, value in payload.items():
