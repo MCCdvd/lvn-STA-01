@@ -211,6 +211,10 @@ def _default_data_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _normalize_ticker(ticker: str) -> str:
+    return str(ticker).strip().upper()
+
+
 def _build_default_params() -> StrategyParams:
     return StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
@@ -237,18 +241,25 @@ def _build_strategy_params(optimized: OptimizedParams) -> StrategyParams:
     )
 
 
-def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_params_path: str) -> Tuple[StrategyParams, Optional[OptimizedParams], str]:
+def _resolve_params_for_ticker(ticker: str, use_optimized: bool, optimized_params_path: str) -> Tuple[StrategyParams, Optional[OptimizedParams], str, bool]:
     if not use_optimized:
-        return _build_default_params(), None, optimized_params_path
+        return _build_default_params(), None, optimized_params_path, False
 
     loader = get_optimized_params_loader(optimized_params_path)
     optimized = loader.get_ticker_params(ticker)
     if optimized is None:
-        return _build_default_params(), None, str(loader.json_path)
-    return _build_strategy_params(optimized), optimized, str(loader.json_path)
+        return _build_default_params(), None, str(loader.json_path), loader.file_found
+    return _build_strategy_params(optimized), optimized, str(loader.json_path), loader.file_found
 
 
-def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optional[OptimizedParams], optimized_params_path: str, use_optimized: bool) -> None:
+def _print_selected_params(
+    ticker: str,
+    params: StrategyParams,
+    optimized: Optional[OptimizedParams],
+    optimized_params_path: str,
+    use_optimized: bool,
+    optimized_file_found: bool,
+) -> None:
     if optimized is not None:
         print(f"Using optimized parameters for {ticker} from: {optimized_params_path}")
         print(
@@ -259,6 +270,8 @@ def _print_selected_params(ticker: str, params: StrategyParams, optimized: Optio
             f"profit_factor={optimized.metrics.profit_factor:.4f}, "
             f"max_drawdown={optimized.metrics.max_drawdown:.2f}"
         )
+    elif use_optimized and not optimized_file_found:
+        print(f"Optimized parameters file not found at: {optimized_params_path}. Using defaults.")
     elif use_optimized:
         print(f"Optimized parameters not available for {ticker}, using defaults.")
     else:
@@ -291,13 +304,14 @@ def main() -> None:
         help="Path to optimized parameters JSON file",
     )
     args = parser.parse_args()
+    ticker = _normalize_ticker(args.ticker)
 
-    params, optimized, optimized_params_path = _resolve_params_for_ticker(args.ticker, args.use_optimized, args.optimized_params)
-    _print_selected_params(args.ticker, params, optimized, optimized_params_path, args.use_optimized)
+    params, optimized, optimized_params_path, optimized_file_found = _resolve_params_for_ticker(ticker, args.use_optimized, args.optimized_params)
+    _print_selected_params(ticker, params, optimized, optimized_params_path, args.use_optimized, optimized_file_found)
 
     trades_df = run_backtest_for_ticker(
         data_dir=args.data_dir,
-        ticker=args.ticker,
+        ticker=ticker,
         params=params,
         investimento_per_trade=CONFIG.strategy.investimento_per_trade,
         commissione_apertura=CONFIG.strategy.commissione_apertura,
@@ -305,7 +319,7 @@ def main() -> None:
     )
     summary_by_ticker_df, summary_global_df = build_summaries(trades_df)
 
-    ticker_dir = os.path.join(args.output_dir, "single_run", args.ticker)
+    ticker_dir = os.path.join(args.output_dir, "single_run", ticker)
     os.makedirs(ticker_dir, exist_ok=True)
     trades_df.to_csv(os.path.join(ticker_dir, "trades.csv"), index=False)
     summary_by_ticker_df.to_csv(os.path.join(ticker_dir, "summary_by_ticker.csv"), index=False)

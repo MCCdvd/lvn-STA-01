@@ -9,6 +9,10 @@ from typing import Dict, Optional
 DEFAULT_OPTIMIZED_PARAMS_PATH = Path(__file__).resolve().with_name("optimized_params.json")
 
 
+def _normalize_ticker(ticker: str) -> str:
+    return str(ticker).strip().upper()
+
+
 @dataclass(frozen=True)
 class OptimizationMetrics:
     total_pnl: float
@@ -32,6 +36,7 @@ class OptimizedParamsLoader:
 
     def __init__(self, json_path: Path):
         self.json_path = json_path
+        self.file_found = False
         self.generated_at: Optional[str] = None
         self.source_file: Optional[str] = None
         self._params_by_ticker: Dict[str, OptimizedParams] = {}
@@ -48,6 +53,7 @@ class OptimizedParamsLoader:
         if not self.json_path.exists():
             return
 
+        self.file_found = True
         raw_payload = json.loads(self.json_path.read_text(encoding="utf-8"))
         self.generated_at = raw_payload.get("generated_at")
         self.source_file = raw_payload.get("source_file")
@@ -59,8 +65,9 @@ class OptimizedParamsLoader:
             if not {"window_profile", "price_tolerance", "lvn_threshold"}.issubset(parameters):
                 continue
             metrics = data.get("metrics", {})
-            self._params_by_ticker[ticker] = OptimizedParams(
-                ticker=ticker,
+            normalized_ticker = _normalize_ticker(ticker)
+            self._params_by_ticker[normalized_ticker] = OptimizedParams(
+                ticker=normalized_ticker,
                 window_profile=int(parameters["window_profile"]),
                 price_tolerance=float(parameters["price_tolerance"]),
                 lvn_threshold=float(parameters["lvn_threshold"]),
@@ -74,10 +81,10 @@ class OptimizedParamsLoader:
             )
 
     def has_ticker(self, ticker: str) -> bool:
-        return ticker in self._params_by_ticker
+        return _normalize_ticker(ticker) in self._params_by_ticker
 
     def get_ticker_params(self, ticker: str) -> Optional[OptimizedParams]:
-        return self._params_by_ticker.get(ticker)
+        return self._params_by_ticker.get(_normalize_ticker(ticker))
 
     def get_ticker_statistics(self, ticker: str) -> Optional[OptimizationMetrics]:
         params = self.get_ticker_params(ticker)
