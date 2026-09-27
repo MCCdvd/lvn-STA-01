@@ -113,6 +113,7 @@ jobs:
                       {
                           "ticker": ticker,
                           "status": "no trades",
+                          "win_count": 0,
                           "trade_count": 0,
                           "win_rate": 0.0,
                           "total_pnl": 0.0,
@@ -126,11 +127,13 @@ jobs:
               summary_by_ticker, _ = build_summaries(trades)
               summary_row = summary_by_ticker.iloc[0].to_dict()
               total_pnl = float(summary_row["total_pnl"])
+              win_count = int((trades["realized_pnl"] > 0).sum())
               status = "profit" if total_pnl > 0 else "loss" if total_pnl < 0 else "flat"
               rows.append(
                   {
                       "ticker": ticker,
                       "status": status,
+                      "win_count": win_count,
                       "trade_count": int(summary_row["trade_count"]),
                       "win_rate": round(float(summary_row["win_rate"]), 2),
                       "total_pnl": round(total_pnl, 2),
@@ -217,7 +220,12 @@ jobs:
                   int(len(summary)),
                   int(summary["trade_count"].sum()),
                   round(float(summary["total_pnl"].sum()), 2),
-                  round(float(summary["win_rate"].mean()), 2),
+                  round(
+                      (float(summary["win_count"].sum()) / float(summary["trade_count"].sum()) * 100)
+                      if float(summary["trade_count"].sum())
+                      else 0.0,
+                      2,
+                  ),
               ),
           )
           conn.commit()
@@ -313,6 +321,9 @@ jobs:
 
             for (const issue of issues) {
               if (issue.number === createdIssue.data.number) {
+                continue;
+              }
+              if (issue.pull_request) {
                 continue;
               }
               const match = issue.title.match(/(\d{4}-\d{2}-\d{2})$/);

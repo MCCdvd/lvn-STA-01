@@ -245,9 +245,16 @@ jobs:
           conn.close()
 
           comparison_lookup = {row["scenario"]: row for row in comparison.to_dict(orient="records")}
-          baseline = comparison_lookup["baseline_global"]
-          optimized = comparison_lookup["per_ticker_best_global"]
-          delta = comparison_lookup["delta_optimized_minus_baseline"]
+          empty_metrics = {
+              "total_trades": 0.0,
+              "total_pnl": 0.0,
+              "overall_win_rate": 0.0,
+              "profit_factor": 0.0,
+              "max_drawdown": 0.0,
+          }
+          baseline = comparison_lookup.get("baseline_global", empty_metrics)
+          optimized = comparison_lookup.get("per_ticker_best_global", empty_metrics)
+          delta = comparison_lookup.get("delta_optimized_minus_baseline", empty_metrics)
 
           top_five = summary_by_ticker.head(5)
           bottom_five = summary_by_ticker.tail(5).sort_values("total_pnl", ascending=True) if not summary_by_ticker.empty else summary_by_ticker
@@ -290,7 +297,7 @@ jobs:
               "## P&L delta from previous month",
           ]
 
-          if previous_total is None:
+          if previous_total is None or previous_delta is None:
               issue_lines.append("- No previous monthly optimization found in SQLite history.")
           else:
               issue_lines.append(
