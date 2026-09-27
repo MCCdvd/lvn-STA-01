@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 import os
@@ -166,7 +167,7 @@ def format_daily_success_message(summary_df: pd.DataFrame, execution_time: float
         lines.append("No ticker summary available")
     else:
         for i, row in enumerate(top.itertuples(index=False), 1):
-            ticker = getattr(row, "ticker", "N/A")
+            ticker = html.escape(str(getattr(row, "ticker", "N/A")))
             pnl = _safe_float(getattr(row, "total_pnl", 0.0), 0.0)
             win_rate = _safe_float(getattr(row, "win_rate", 0.0), 0.0)
             lines.append(f"{i}. {ticker}: €{pnl:,.2f} ({win_rate:.2f}% win_rate)")
@@ -194,7 +195,7 @@ def format_daily_failure_message(error: str, run_url: str) -> str:
             "⚠️ <b>DAILY BACKTEST - FAILED</b>",
             "",
             "❌ <b>Error Details:</b>",
-            error.strip() if error else "Unknown error",
+            html.escape(error.strip()) if error else "Unknown error",
             "",
             "📍 Location: Daily Backtest Workflow",
             f"🔗 View Run: {run_url}",
@@ -289,7 +290,7 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         conn.close()
 
     pnl_delta_pct: Optional[float] = None
-    if baseline_metrics["total_pnl"] != 0:
+    if baseline_metrics["total_pnl"] > 0:
         pnl_delta_pct = ((optimized_metrics["total_pnl"] - baseline_metrics["total_pnl"]) / baseline_metrics["total_pnl"]) * 100
 
     lines = [
@@ -299,14 +300,14 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         "",
         "🎯 <b>Parameter Changes:</b>",
         "Old Parameters:",
-        f"├─ window_profile: {old_params['window_profile']}",
-        f"├─ price_tolerance: {old_params['price_tolerance']}",
-        f"└─ lvn_threshold: {old_params['lvn_threshold']}",
+        f"├─ window_profile: {html.escape(str(old_params['window_profile']))}",
+        f"├─ price_tolerance: {html.escape(str(old_params['price_tolerance']))}",
+        f"└─ lvn_threshold: {html.escape(str(old_params['lvn_threshold']))}",
         "",
         "New Optimized:",
-        f"├─ window_profile: {new_params['window_profile']}",
-        f"├─ price_tolerance: {new_params['price_tolerance']}",
-        f"└─ lvn_threshold: {new_params['lvn_threshold']}",
+        f"├─ window_profile: {html.escape(str(new_params['window_profile']))}",
+        f"├─ price_tolerance: {html.escape(str(new_params['price_tolerance']))}",
+        f"└─ lvn_threshold: {html.escape(str(new_params['lvn_threshold']))}",
         "",
         "📈 <b>Performance Improvement:</b>",
         (
@@ -324,7 +325,7 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         lines.append("No optimized ticker rows found in database")
     else:
         for i, row in enumerate(top_rows.itertuples(index=False), 1):
-            ticker = getattr(row, "ticker", "N/A")
+            ticker = html.escape(str(getattr(row, "ticker", "N/A")))
             total_pnl = _safe_float(getattr(row, "total_pnl", 0.0))
             delta = _safe_float(getattr(row, "net_pnl_delta", 0.0))
             lines.append(f"{i}. {ticker}: €{total_pnl:,.2f} (net {delta:+,.2f})")
@@ -342,7 +343,7 @@ def format_monthly_failure_message(error: str, run_url: str) -> str:
             "⚠️ <b>MONTHLY OPTIMIZATION - FAILED</b>",
             "",
             "❌ Error in optimization process",
-            f"Error: {error.strip() if error else 'Unknown error'}",
+            f"Error: {html.escape(error.strip()) if error else 'Unknown error'}",
             "",
             f"🔗 View Run: {run_url}",
         ]
