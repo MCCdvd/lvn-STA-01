@@ -424,7 +424,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          stashed=false
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git stash push --include-untracked -m "workflow-generated-artifacts"
+            stashed=true
+          fi
           git pull --rebase origin "${GITHUB_REF_NAME}"
+          if [ "$stashed" = "true" ]; then
+            git stash pop
+          fi
           if compgen -G "data/*.csv" > /dev/null; then
             git add data/*.csv
           fi
