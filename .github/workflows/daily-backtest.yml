@@ -439,7 +439,15 @@ jobs:
             commit_message="Update daily backtest history for ${{ steps.schedule.outputs.run_date }}"
           fi
           git commit -m "$commit_message"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          for attempt in 1 2 3; do
+            if git push origin HEAD:${GITHUB_REF_NAME}; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), rebasing and retrying..."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "Failed to push generated artifacts after retries."
+          exit 1
 
       - name: Fail job when backtest execution fails
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
