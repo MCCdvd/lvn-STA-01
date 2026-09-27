@@ -1,0 +1,443 @@
+name: Monthly Optimization
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8,9 1 * *"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: monthly-optimize-${{ github.event.repository.default_branch }}
+  cancel-in-progress: false
+
+jobs:
+  monthly-optimization:
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Rome schedule
+        id: schedule
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            should_run=true
+          else
+            rome_day="$(TZ=Europe/Rome date '+%d')"
+            rome_hour="$(TZ=Europe/Rome date '+%H')"
+            if [ "$rome_day" = "01" ] && [ "$rome_hour" = "10" ]; then
+              should_run=true
+            else
+              should_run=false
+            fi
+          fi
+
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          echo "run_month=$(TZ=Europe/Rome date '+%B %Y')" >> "$GITHUB_OUTPUT"
+          echo "run_month_key=$(TZ=Europe/Rome date '+%Y-%m')" >> "$GITHUB_OUTPUT"
+
+      - name: Skip duplicate DST slot
+        if: steps.schedule.outputs.should_run != 'true'
+        run: echo "Skipping run because this UTC slot is outside 10:00 on the 1st in Europe/Rome."
+
+      - name: Set up Python
+        if: steps.schedule.outputs.should_run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        if: steps.schedule.outputs.should_run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas scipy
+
+      - name: Run monthly optimization
+        if: steps.schedule.outputs.should_run == 'true'
+        id: optimize
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python optimizer.py \
+            --data-dir "$GITHUB_WORKSPACE" \
+            --output-dir "$GITHUB_WORKSPACE/monthly_optimization" \
+            2>&1 | tee monthly_optimization.log
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build optimization report, JSON export, and SQLite history
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0'
+        env:
+          RUN_MONTH: ${{ steps.schedule.outputs.run_month }}
+          RUN_MONTH_KEY: ${{ steps.schedule.outputs.run_month_key }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          import pandas as pd
+
+          repo = Path(os.environ["GITHUB_WORKSPACE"])
+          temp_dir = Path(os.environ["RUNNER_TEMP"])
+          output_dir = repo / "monthly_optimization"
+          run_month = os.environ["RUN_MONTH"]
+          run_month_key = os.environ["RUN_MONTH_KEY"]
+
+          comparison = pd.read_csv(output_dir / "comparison_baseline_vs_per_ticker.csv")
+          best_params = pd.read_csv(output_dir / "per_ticker_best_global" / "best_params_all_tickers.csv")
+          try:
+              summary_by_ticker = pd.read_csv(output_dir / "per_ticker_best_global" / "summary_by_ticker.csv")
+          except pd.errors.EmptyDataError:
+              summary_by_ticker = pd.DataFrame(
+                  columns=["ticker", "trade_count", "win_rate", "total_pnl", "avg_pnl_per_trade", "profit_factor", "max_drawdown"]
+              )
+
+          optimized_payload = {
+              "month": run_month_key,
+              "generated_from": "monthly-optimize.yml",
+              "tickers": [],
+          }
+          for row in best_params.itertuples(index=False):
+              optimized_payload["tickers"].append(
+                  {
+                      "ticker": row.ticker,
+                      "window_profile": int(row.window_profile),
+                      "price_tolerance": float(row.price_tolerance),
+                      "lvn_threshold": float(row.lvn_threshold),
+                      "trade_count": int(row.trade_count),
+                      "total_pnl": round(float(row.total_pnl), 2),
+                      "overall_win_rate": round(float(row.overall_win_rate), 2),
+                      "profit_factor": float(row.profit_factor),
+                      "max_drawdown": round(float(row.max_drawdown), 2),
+                  }
+              )
+          (repo / "optimized_params.json").write_text(json.dumps(optimized_payload, indent=2) + "\n", encoding="utf-8")
+
+          db_path = repo / "backtest_results.db"
+          conn = sqlite3.connect(db_path)
+          conn.execute(
+              """
+              CREATE TABLE IF NOT EXISTS monthly_optimization_runs (
+                  run_month TEXT NOT NULL,
+                  scenario TEXT NOT NULL,
+                  total_trades REAL NOT NULL,
+                  total_pnl REAL NOT NULL,
+                  overall_win_rate REAL NOT NULL,
+                  profit_factor REAL NOT NULL,
+                  max_drawdown REAL NOT NULL,
+                  pnl_delta_from_previous_month REAL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (run_month, scenario)
+              )
+              """
+          )
+          conn.execute(
+              """
+              CREATE TABLE IF NOT EXISTS monthly_optimized_params (
+                  run_month TEXT NOT NULL,
+                  ticker TEXT NOT NULL,
+                  window_profile INTEGER NOT NULL,
+                  price_tolerance REAL NOT NULL,
+                  lvn_threshold REAL NOT NULL,
+                  trade_count REAL NOT NULL,
+                  total_pnl REAL NOT NULL,
+                  overall_win_rate REAL NOT NULL,
+                  profit_factor REAL NOT NULL,
+                  max_drawdown REAL NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (run_month, ticker)
+              )
+              """
+          )
+
+          previous_total = conn.execute(
+              """
+              SELECT total_pnl
+              FROM monthly_optimization_runs
+              WHERE scenario = 'per_ticker_best_global' AND run_month < ?
+              ORDER BY run_month DESC
+              LIMIT 1
+              """,
+              (run_month_key,),
+          ).fetchone()
+
+          comparison_rows = []
+          previous_delta = None
+          for row in comparison.itertuples(index=False):
+              pnl_delta = None
+              if row.scenario == "per_ticker_best_global" and previous_total is not None:
+                  previous_delta = round(float(row.total_pnl) - float(previous_total[0]), 2)
+                  pnl_delta = previous_delta
+              comparison_rows.append(
+                  (
+                      run_month_key,
+                      row.scenario,
+                      float(row.total_trades),
+                      round(float(row.total_pnl), 2),
+                      round(float(row.overall_win_rate), 2),
+                      float(row.profit_factor),
+                      round(float(row.max_drawdown), 2),
+                      pnl_delta,
+                  )
+              )
+
+          conn.executemany(
+              """
+              INSERT INTO monthly_optimization_runs
+              (run_month, scenario, total_trades, total_pnl, overall_win_rate, profit_factor, max_drawdown, pnl_delta_from_previous_month)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(run_month, scenario) DO UPDATE SET
+                  total_trades = excluded.total_trades,
+                  total_pnl = excluded.total_pnl,
+                  overall_win_rate = excluded.overall_win_rate,
+                  profit_factor = excluded.profit_factor,
+                  max_drawdown = excluded.max_drawdown,
+                  pnl_delta_from_previous_month = excluded.pnl_delta_from_previous_month
+              """,
+              comparison_rows,
+          )
+          conn.executemany(
+              """
+              INSERT INTO monthly_optimized_params
+              (run_month, ticker, window_profile, price_tolerance, lvn_threshold, trade_count, total_pnl, overall_win_rate, profit_factor, max_drawdown)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(run_month, ticker) DO UPDATE SET
+                  window_profile = excluded.window_profile,
+                  price_tolerance = excluded.price_tolerance,
+                  lvn_threshold = excluded.lvn_threshold,
+                  trade_count = excluded.trade_count,
+                  total_pnl = excluded.total_pnl,
+                  overall_win_rate = excluded.overall_win_rate,
+                  profit_factor = excluded.profit_factor,
+                  max_drawdown = excluded.max_drawdown
+              """,
+              [
+                  (
+                      run_month_key,
+                      row.ticker,
+                      int(row.window_profile),
+                      float(row.price_tolerance),
+                      float(row.lvn_threshold),
+                      float(row.trade_count),
+                      round(float(row.total_pnl), 2),
+                      round(float(row.overall_win_rate), 2),
+                      float(row.profit_factor),
+                      round(float(row.max_drawdown), 2),
+                  )
+                  for row in best_params.itertuples(index=False)
+              ],
+          )
+          conn.commit()
+          conn.close()
+
+          comparison_lookup = {row["scenario"]: row for row in comparison.to_dict(orient="records")}
+          empty_metrics = {
+              "total_trades": 0.0,
+              "total_pnl": 0.0,
+              "overall_win_rate": 0.0,
+              "profit_factor": 0.0,
+              "max_drawdown": 0.0,
+          }
+          baseline = comparison_lookup.get("baseline_global", empty_metrics)
+          optimized = comparison_lookup.get("per_ticker_best_global", empty_metrics)
+          delta = comparison_lookup.get("delta_optimized_minus_baseline", empty_metrics)
+
+          top_five = summary_by_ticker.head(5)
+          bottom_five = summary_by_ticker.tail(5).sort_values("total_pnl", ascending=True) if not summary_by_ticker.empty else summary_by_ticker
+          parameter_lines = [
+              (
+                  f"- {row.ticker}: window_profile={int(row.window_profile)}, "
+                  f"price_tolerance={float(row.price_tolerance):.2f}, "
+                  f"lvn_threshold={float(row.lvn_threshold):.2f}, "
+                  f"trades={int(row.trade_count)}, P&L={float(row.total_pnl):.2f}"
+              )
+              for row in best_params.itertuples(index=False)
+          ]
+
+          issue_lines = [
+              f"# Monthly Optimization Results - {run_month}",
+              "",
+              "## Performance comparison (old vs new)",
+              (
+                  f"- Baseline shared params: trades={float(baseline['total_trades']):.0f}, "
+                  f"P&L={float(baseline['total_pnl']):.2f}, "
+                  f"win_rate={float(baseline['overall_win_rate']):.2f}%, "
+                  f"profit_factor={float(baseline['profit_factor']):.4f}, "
+                  f"max_drawdown={float(baseline['max_drawdown']):.2f}"
+              ),
+              (
+                  f"- Optimized per ticker: trades={float(optimized['total_trades']):.0f}, "
+                  f"P&L={float(optimized['total_pnl']):.2f}, "
+                  f"win_rate={float(optimized['overall_win_rate']):.2f}%, "
+                  f"profit_factor={float(optimized['profit_factor']):.4f}, "
+                  f"max_drawdown={float(optimized['max_drawdown']):.2f}"
+              ),
+              (
+                  f"- Delta optimized minus baseline: trades={float(delta['total_trades']):.0f}, "
+                  f"P&L={float(delta['total_pnl']):.2f}, "
+                  f"win_rate={float(delta['overall_win_rate']):.2f}%, "
+                  f"profit_factor={float(delta['profit_factor']):.4f}, "
+                  f"max_drawdown={float(delta['max_drawdown']):.2f}"
+              ),
+              "",
+              "## P&L delta from previous month",
+          ]
+
+          if previous_total is None or previous_delta is None:
+              issue_lines.append("- No previous monthly optimization found in SQLite history.")
+          else:
+              issue_lines.append(
+                  f"- Previous optimized total P&L: {float(previous_total[0]):.2f}; current delta: {previous_delta:.2f}"
+              )
+
+          issue_lines.extend(["", "## Top 5 tickers"])
+          if top_five.empty:
+              issue_lines.append("- No optimized trades recorded for this month.")
+          else:
+              issue_lines.extend(
+                  [
+                      f"- {row.ticker}: trades={int(row.trade_count)}, P&L={float(row.total_pnl):.2f}, win_rate={float(row.win_rate):.2f}%"
+                      for row in top_five.itertuples(index=False)
+                  ]
+              )
+
+          issue_lines.extend(["", "## Bottom 5 tickers"])
+          if bottom_five.empty:
+              issue_lines.append("- No optimized trades recorded for this month.")
+          else:
+              issue_lines.extend(
+                  [
+                      f"- {row.ticker}: trades={int(row.trade_count)}, P&L={float(row.total_pnl):.2f}, win_rate={float(row.win_rate):.2f}%"
+                      for row in bottom_five.itertuples(index=False)
+                  ]
+              )
+
+          issue_lines.extend(["", "## New optimized parameters summary", "<details>", "<summary>All tickers</summary>", ""])
+          issue_lines.extend(parameter_lines)
+          issue_lines.extend(["", "</details>"])
+
+          (temp_dir / "monthly_success_issue.md").write_text("\n".join(issue_lines) + "\n", encoding="utf-8")
+          print(f"Updated {repo / 'optimized_params.json'} and {db_path}")
+          PY
+
+      - name: Prepare monthly failure issue body
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code != '0'
+        env:
+          RUN_MONTH: ${{ steps.schedule.outputs.run_month }}
+        shell: bash
+        run: |
+          {
+            echo "# Monthly optimization failure - ${RUN_MONTH}"
+            echo
+            echo "Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```text'
+            if [ -f monthly_optimization.log ]; then
+              tail -n 200 monthly_optimization.log
+            else
+              echo "No log output captured."
+            fi
+            echo '```'
+          } > "$RUNNER_TEMP/monthly_failure_issue.md"
+
+      - name: Ensure issue labels exist
+        if: steps.schedule.outputs.should_run == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: "optimization", color: "5319E7", description: "Optimization automation notifications" },
+              { name: "monthly", color: "C2E0C6", description: "Monthly automation notifications" },
+              { name: "success", color: "0E8A16", description: "Successful automation runs" },
+              { name: "failure", color: "D73A4A", description: "Failed automation runs" }
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                } else if (error.status !== 422) {
+                  throw error;
+                }
+              }
+            }
+
+      - name: Create monthly success issue
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0'
+        uses: actions/github-script@v7
+        env:
+          RUN_MONTH: ${{ steps.schedule.outputs.run_month }}
+          ISSUE_BODY_FILE: ${{ runner.temp }}/monthly_success_issue.md
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Monthly Optimization Results - ${process.env.RUN_MONTH}`,
+              body,
+              labels: ["optimization", "monthly", "success"]
+            });
+
+      - name: Create monthly failure issue
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        env:
+          RUN_MONTH: ${{ steps.schedule.outputs.run_month }}
+          ISSUE_BODY_FILE: ${{ runner.temp }}/monthly_failure_issue.md
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ Monthly Optimization FAILED - ${process.env.RUN_MONTH}`,
+              body,
+              labels: ["optimization", "monthly", "failure"]
+            });
+
+      - name: Commit updated persistent files
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backtest_results.db optimized_params.json
+          if git diff --cached --quiet; then
+            echo "No persistent file changes to commit."
+            exit 0
+          fi
+          git commit -m "Update monthly optimization artifacts for ${{ steps.schedule.outputs.run_month_key }}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+      - name: Fail job when optimization execution fails
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code != '0'
+        run: exit 1
