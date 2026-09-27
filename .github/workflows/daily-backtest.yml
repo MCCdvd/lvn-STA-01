@@ -1,0 +1,462 @@
+name: Daily Backtest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6,7 * * *"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: daily-backtest-${{ github.event.repository.default_branch }}
+  cancel-in-progress: false
+
+jobs:
+  daily-backtest:
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Rome schedule
+        id: schedule
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            should_run=true
+          else
+            rome_hour="$(TZ=Europe/Rome date '+%H')"
+            if [ "$rome_hour" = "08" ]; then
+              should_run=true
+            else
+              should_run=false
+            fi
+          fi
+
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          echo "run_date=$(TZ=Europe/Rome date '+%F')" >> "$GITHUB_OUTPUT"
+          echo "cutoff_date=$(TZ=Europe/Rome date -d '7 days ago' '+%F')" >> "$GITHUB_OUTPUT"
+
+      - name: Skip duplicate DST slot
+        if: steps.schedule.outputs.should_run != 'true'
+        run: echo "Skipping run because this UTC slot is outside 08:00 Europe/Rome."
+
+      - name: Set up Python
+        if: steps.schedule.outputs.should_run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        if: steps.schedule.outputs.should_run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas scipy 'yfinance>=0.2.0'
+
+      - name: Fetch latest ticker prices
+        if: steps.schedule.outputs.should_run == 'true'
+        run: python fetch_latest_prices.py --data-dir ./data
+
+      - name: Run daily backtest and persist SQLite history
+        if: steps.schedule.outputs.should_run == 'true'
+        id: backtest
+        continue-on-error: true
+        env:
+          RUN_DATE: ${{ steps.schedule.outputs.run_date }}
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee daily_backtest.log
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          import pandas as pd
+
+          from backtest import build_summaries, run_backtest_for_ticker
+          from config import CONFIG
+          from engine import StrategyParams
+
+          repo = Path(os.environ["GITHUB_WORKSPACE"])
+          temp_dir = Path(os.environ["RUNNER_TEMP"])
+          run_date = os.environ["RUN_DATE"]
+          data_dir = repo / "data"
+          tickers = sorted(path.stem for path in data_dir.glob("*.csv"))
+          if not tickers:
+              data_dir = repo
+              tickers = sorted(path.stem for path in repo.glob("*.csv"))
+          if not tickers:
+              raise ValueError("No ticker CSV files found in ./data or repository root")
+
+          params = StrategyParams(
+              window_profile=CONFIG.strategy.window_profile,
+              price_tolerance=CONFIG.strategy.price_tolerance,
+              lvn_threshold=CONFIG.strategy.lvn_threshold,
+              bin_step=CONFIG.strategy.bin_step,
+              min_profile_levels=CONFIG.strategy.min_profile_levels,
+              rsi_period=CONFIG.strategy.rsi_period,
+              rsi_long_max=CONFIG.strategy.rsi_long_max,
+              rsi_short_min=CONFIG.strategy.rsi_short_min,
+          )
+
+          rows = []
+          for ticker in tickers:
+              trades = run_backtest_for_ticker(
+                  data_dir=str(data_dir),
+                  ticker=ticker,
+                  params=params,
+                  investimento_per_trade=CONFIG.strategy.investimento_per_trade,
+                  commissione_apertura=CONFIG.strategy.commissione_apertura,
+                  commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+              )
+              if trades.empty:
+                  rows.append(
+                      {
+                          "ticker": ticker,
+                          "status": "no trades",
+                          "win_count": 0,
+                          "trade_count": 0,
+                          "win_rate": 0.0,
+                          "total_pnl": 0.0,
+                          "avg_pnl_per_trade": 0.0,
+                          "profit_factor": 0.0,
+                          "max_drawdown": 0.0,
+                      }
+                  )
+                  continue
+
+              summary_by_ticker, _ = build_summaries(trades)
+              summary_row = summary_by_ticker.iloc[0].to_dict()
+              total_pnl = float(summary_row["total_pnl"])
+              win_count = int((trades["realized_pnl"] > 0).sum())
+              status = "profit" if total_pnl > 0 else "loss" if total_pnl < 0 else "flat"
+              rows.append(
+                  {
+                      "ticker": ticker,
+                      "status": status,
+                      "win_count": win_count,
+                      "trade_count": int(summary_row["trade_count"]),
+                      "win_rate": round(float(summary_row["win_rate"]), 2),
+                      "total_pnl": round(total_pnl, 2),
+                      "avg_pnl_per_trade": round(float(summary_row["avg_pnl_per_trade"]), 2),
+                      "profit_factor": float(summary_row["profit_factor"]),
+                      "max_drawdown": round(float(summary_row["max_drawdown"]), 2),
+                  }
+              )
+
+          summary = pd.DataFrame(rows).sort_values(
+              by=["total_pnl", "ticker"],
+              ascending=[False, True],
+          ).reset_index(drop=True)
+          summary_path = temp_dir / "daily_backtest_summary.csv"
+          summary.to_csv(summary_path, index=False)
+
+          issue_lines = [
+              f"# Daily Backtest Results - {run_date}",
+              "",
+              f"Total P&L: {summary['total_pnl'].sum():.2f}",
+              f"Tickers processed: {len(summary)}",
+              "",
+              "## Ticker ranking",
+          ]
+          issue_lines.extend(
+              [
+                  f"- {row.ticker}: {row.status}, {int(row.trade_count)} trades, P&L {float(row.total_pnl):.2f}, {float(row.win_rate):.2f}%"
+                  for row in summary.itertuples(index=False)
+              ]
+          )
+          (temp_dir / "daily_success_issue.md").write_text("\n".join(issue_lines) + "\n", encoding="utf-8")
+
+          db_path = repo / "backtest_results.db"
+          conn = sqlite3.connect(db_path)
+          conn.execute(
+              """
+              CREATE TABLE IF NOT EXISTS daily_backtest_runs (
+                  run_date TEXT NOT NULL,
+                  ticker TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  trade_count INTEGER NOT NULL,
+                  win_rate REAL NOT NULL,
+                  total_pnl REAL NOT NULL,
+                  avg_pnl_per_trade REAL NOT NULL,
+                  profit_factor REAL NOT NULL,
+                  max_drawdown REAL NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (run_date, ticker)
+              )
+              """
+          )
+          conn.execute(
+              """
+              CREATE TABLE IF NOT EXISTS daily_backtest_totals (
+                  run_date TEXT PRIMARY KEY,
+                  ticker_count INTEGER NOT NULL,
+                  total_trades INTEGER NOT NULL,
+                  total_pnl REAL NOT NULL,
+                  average_win_rate REAL NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              )
+              """
+          )
+          stage_df = summary[
+              [
+                  "ticker",
+                  "status",
+                  "trade_count",
+                  "win_rate",
+                  "total_pnl",
+                  "avg_pnl_per_trade",
+                  "profit_factor",
+                  "max_drawdown",
+              ]
+          ].copy()
+          stage_df.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
+          conn.execute("DELETE FROM daily_backtest_runs WHERE run_date = ?", (run_date,))
+          conn.execute(
+              """
+              INSERT INTO daily_backtest_runs
+              (run_date, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown)
+              SELECT ?, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown
+              FROM daily_backtest_runs_stage
+              """,
+              (run_date,),
+          )
+          conn.execute("DROP TABLE daily_backtest_runs_stage")
+          conn.execute("DELETE FROM daily_backtest_totals WHERE run_date = ?", (run_date,))
+          conn.execute(
+              """
+              INSERT INTO daily_backtest_totals (run_date, ticker_count, total_trades, total_pnl, average_win_rate)
+              VALUES (?, ?, ?, ?, ?)
+              """,
+              (
+                  run_date,
+                  int(len(summary)),
+                  int(summary["trade_count"].sum()),
+                  round(float(summary["total_pnl"].sum()), 2),
+                  round(
+                      (float(summary["win_count"].sum()) / float(summary["trade_count"].sum()) * 100)
+                      if float(summary["trade_count"].sum())
+                      else 0.0,
+                      2,
+                  ),
+              ),
+          )
+          conn.commit()
+          conn.close()
+
+          print(f"Saved daily summary to {summary_path}")
+          print(f"Updated SQLite history at {db_path}")
+          PY
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Prepare daily failure issue body
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        env:
+          RUN_DATE: ${{ steps.schedule.outputs.run_date }}
+        shell: bash
+        run: |
+          {
+            echo "# Daily backtest failure - ${RUN_DATE}"
+            echo
+            echo "Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```text'
+            if [ -f daily_backtest.log ]; then
+              tail -n 200 daily_backtest.log
+            else
+              echo "No log output captured."
+            fi
+            echo '```'
+          } > "$RUNNER_TEMP/daily_failure_issue.md"
+
+      - name: Ensure issue labels exist
+        if: steps.schedule.outputs.should_run == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: "backtest", color: "1D76DB", description: "Backtest automation notifications" },
+              { name: "daily", color: "FBCA04", description: "Daily automation notifications" },
+              { name: "success", color: "0E8A16", description: "Successful automation runs" },
+              { name: "failure", color: "D73A4A", description: "Failed automation runs" }
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                } else if (error.status !== 422) {
+                  throw error;
+                }
+              }
+            }
+
+      - name: Create daily success issue and close stale daily issues
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
+        uses: actions/github-script@v7
+        env:
+          RUN_DATE: ${{ steps.schedule.outputs.run_date }}
+          CUTOFF_DATE: ${{ steps.schedule.outputs.cutoff_date }}
+          ISSUE_BODY_FILE: ${{ runner.temp }}/daily_success_issue.md
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
+            const title = `Daily Backtest Results - ${process.env.RUN_DATE}`;
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "backtest,daily,success",
+              per_page: 100
+            });
+            const alreadyOpen = existing.find((issue) => !issue.pull_request && issue.title === title);
+
+            let createdIssue;
+            if (alreadyOpen) {
+              createdIssue = { data: alreadyOpen };
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              createdIssue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["backtest", "daily", "success"]
+              });
+            }
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "backtest,daily,success",
+              per_page: 100
+            });
+
+            for (const issue of issues) {
+              if (issue.number === createdIssue.data.number) {
+                continue;
+              }
+              if (issue.pull_request) {
+                continue;
+              }
+              const match = issue.title.match(/(\d{4}-\d{2}-\d{2})$/);
+              if (!match) {
+                continue;
+              }
+              if (match[1] < process.env.CUTOFF_DATE) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: "closed"
+                });
+              }
+            }
+
+      - name: Create daily failure issue
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        env:
+          RUN_DATE: ${{ steps.schedule.outputs.run_date }}
+          ISSUE_BODY_FILE: ${{ runner.temp }}/daily_failure_issue.md
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
+            const title = `⚠️ Daily Backtest FAILED - ${process.env.RUN_DATE}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "backtest,daily,failure",
+              per_page: 100
+            });
+            const alreadyOpen = issues.find((issue) => !issue.pull_request && issue.title === title);
+
+            if (alreadyOpen) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["backtest", "daily", "failure"]
+              });
+            }
+
+      - name: Commit updated SQLite history
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          stashed=false
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git stash push --include-untracked -m "workflow-generated-artifacts"
+            stashed=true
+          fi
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          if [ "$stashed" = "true" ]; then
+            git stash pop
+          fi
+          if compgen -G "data/*.csv" > /dev/null; then
+            git add data/*.csv
+          fi
+          git add backtest_results.db
+          if git diff --cached --quiet; then
+            echo "No database changes to commit."
+            exit 0
+          fi
+          if git diff --cached --name-only | grep -q '^data/'; then
+            commit_message="chore: update ticker prices - $(date +%Y-%m-%d)"
+          else
+            commit_message="Update daily backtest history for ${{ steps.schedule.outputs.run_date }}"
+          fi
+          git commit -m "$commit_message"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:${GITHUB_REF_NAME}; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), rebasing and retrying..."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "Failed to push generated artifacts after retries."
+          exit 1
+
+      - name: Fail job when backtest execution fails
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        run: exit 1
