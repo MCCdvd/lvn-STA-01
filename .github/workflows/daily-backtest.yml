@@ -396,13 +396,32 @@ jobs:
           script: |
             const fs = require("fs");
             const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
-            await github.rest.issues.create({
+            const title = `⚠️ Daily Backtest FAILED - ${process.env.RUN_DATE}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `⚠️ Daily Backtest FAILED - ${process.env.RUN_DATE}`,
-              body,
-              labels: ["backtest", "daily", "failure"]
+              state: "open",
+              labels: "backtest,daily,failure",
+              per_page: 100
             });
+            const alreadyOpen = issues.find((issue) => !issue.pull_request && issue.title === title);
+
+            if (alreadyOpen) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["backtest", "daily", "failure"]
+              });
+            }
 
       - name: Commit updated SQLite history
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
@@ -410,6 +429,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if compgen -G "data/*.csv" > /dev/null; then
+            git add data/*.csv
+          fi
           git add backtest_results.db
           if git diff --cached --quiet; then
             echo "No database changes to commit."
