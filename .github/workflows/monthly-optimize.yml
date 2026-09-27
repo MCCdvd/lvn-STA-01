@@ -413,7 +413,7 @@ jobs:
             });
 
       - name: Commit updated persistent files
-        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0' && github.ref_type == 'branch'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
