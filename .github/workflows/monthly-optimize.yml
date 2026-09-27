@@ -43,6 +43,7 @@ jobs:
           echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
           echo "run_month=$(TZ=Europe/Rome date '+%B %Y')" >> "$GITHUB_OUTPUT"
           echo "run_month_key=$(TZ=Europe/Rome date '+%Y-%m')" >> "$GITHUB_OUTPUT"
+          echo "cutoff_date=$(TZ=Europe/Rome date -d '7 days ago' '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
       - name: Skip duplicate DST slot
         if: steps.schedule.outputs.should_run != 'true'
@@ -58,7 +59,11 @@ jobs:
         if: steps.schedule.outputs.should_run == 'true'
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy pandas scipy
+          python -m pip install numpy pandas scipy 'yfinance>=0.2.0'
+
+      - name: Fetch latest ticker prices
+        if: steps.schedule.outputs.should_run == 'true'
+        run: python fetch_latest_prices.py --data-dir "$GITHUB_WORKSPACE/data"
 
       - name: Run monthly optimization
         if: steps.schedule.outputs.should_run == 'true'
@@ -68,8 +73,12 @@ jobs:
         run: |
           set +e
           set -o pipefail
+          data_dir="$GITHUB_WORKSPACE/data"
+          if ! compgen -G "$data_dir/*.csv" > /dev/null; then
+            data_dir="$GITHUB_WORKSPACE"
+          fi
           python optimizer.py \
-            --data-dir "$GITHUB_WORKSPACE" \
+            --data-dir "$data_dir" \
             --output-dir "$GITHUB_WORKSPACE/monthly_optimization" \
             2>&1 | tee monthly_optimization.log
           exit_code=${PIPESTATUS[0]}
@@ -393,18 +402,59 @@ jobs:
         uses: actions/github-script@v7
         env:
           RUN_MONTH: ${{ steps.schedule.outputs.run_month }}
+          CUTOFF_DATE: ${{ steps.schedule.outputs.cutoff_date }}
           ISSUE_BODY_FILE: ${{ runner.temp }}/monthly_success_issue.md
         with:
           script: |
             const fs = require("fs");
             const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
-            await github.rest.issues.create({
+            const title = `Monthly Optimization Results - ${process.env.RUN_MONTH}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Monthly Optimization Results - ${process.env.RUN_MONTH}`,
-              body,
-              labels: ["optimization", "monthly", "success"]
+              state: "open",
+              labels: "optimization,monthly,success",
+              per_page: 100
             });
+            const alreadyOpen = issues.find((issue) => !issue.pull_request && issue.title === title);
+
+            let createdIssue;
+            if (alreadyOpen) {
+              createdIssue = { data: alreadyOpen };
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              createdIssue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["optimization", "monthly", "success"]
+              });
+            }
+
+            for (const issue of issues) {
+              if (issue.number === createdIssue.data.number || issue.pull_request) {
+                continue;
+              }
+              const match = issue.title.match(/([A-Za-z]+ \d{4})$/);
+              if (!match) {
+                continue;
+              }
+              const createdAt = issue.created_at.slice(0, 10);
+              if (createdAt < process.env.CUTOFF_DATE) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: "closed"
+                });
+              }
+            }
 
       - name: Create monthly failure issue
         if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code != '0'
@@ -416,13 +466,32 @@ jobs:
           script: |
             const fs = require("fs");
             const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
-            await github.rest.issues.create({
+            const title = `⚠️ Monthly Optimization FAILED - ${process.env.RUN_MONTH}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `⚠️ Monthly Optimization FAILED - ${process.env.RUN_MONTH}`,
-              body,
-              labels: ["optimization", "monthly", "failure"]
+              state: "open",
+              labels: "optimization,monthly,failure",
+              per_page: 100
             });
+            const alreadyOpen = issues.find((issue) => !issue.pull_request && issue.title === title);
+
+            if (alreadyOpen) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["optimization", "monthly", "failure"]
+              });
+            }
 
       - name: Commit updated persistent files
         if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
@@ -430,13 +499,38 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          stashed=false
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git stash push --include-untracked -m "workflow-generated-artifacts"
+            stashed=true
+          fi
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          if [ "$stashed" = "true" ]; then
+            git stash pop
+          fi
+          if compgen -G "data/*.csv" > /dev/null; then
+            git add data/*.csv
+          fi
           git add backtest_results.db optimized_params.json
           if git diff --cached --quiet; then
             echo "No persistent file changes to commit."
             exit 0
           fi
-          git commit -m "Update monthly optimization artifacts for ${{ steps.schedule.outputs.run_month_key }}"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          if git diff --cached --name-only | grep -q '^data/'; then
+            commit_message="chore: update ticker prices - $(date +%Y-%m-%d)"
+          else
+            commit_message="Update monthly optimization artifacts for ${{ steps.schedule.outputs.run_month_key }}"
+          fi
+          git commit -m "$commit_message"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:${GITHUB_REF_NAME}; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), rebasing and retrying..."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "Failed to push generated artifacts after retries."
+          exit 1
 
       - name: Fail job when optimization execution fails
         if: steps.schedule.outputs.should_run == 'true' && steps.optimize.outputs.exit_code != '0'

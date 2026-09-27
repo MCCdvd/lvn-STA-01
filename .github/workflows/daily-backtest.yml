@@ -57,7 +57,11 @@ jobs:
         if: steps.schedule.outputs.should_run == 'true'
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy pandas scipy
+          python -m pip install numpy pandas scipy 'yfinance>=0.2.0'
+
+      - name: Fetch latest ticker prices
+        if: steps.schedule.outputs.should_run == 'true'
+        run: python fetch_latest_prices.py --data-dir ./data
 
       - name: Run daily backtest and persist SQLite history
         if: steps.schedule.outputs.should_run == 'true'
@@ -83,9 +87,13 @@ jobs:
           repo = Path(os.environ["GITHUB_WORKSPACE"])
           temp_dir = Path(os.environ["RUNNER_TEMP"])
           run_date = os.environ["RUN_DATE"]
-          tickers = sorted(path.stem for path in repo.glob("*.csv"))
+          data_dir = repo / "data"
+          tickers = sorted(path.stem for path in data_dir.glob("*.csv"))
           if not tickers:
-              raise ValueError("No ticker CSV files found in repository root")
+              data_dir = repo
+              tickers = sorted(path.stem for path in repo.glob("*.csv"))
+          if not tickers:
+              raise ValueError("No ticker CSV files found in ./data or repository root")
 
           params = StrategyParams(
               window_profile=CONFIG.strategy.window_profile,
@@ -101,7 +109,7 @@ jobs:
           rows = []
           for ticker in tickers:
               trades = run_backtest_for_ticker(
-                  data_dir=str(repo),
+                  data_dir=str(data_dir),
                   ticker=ticker,
                   params=params,
                   investimento_per_trade=CONFIG.strategy.investimento_per_trade,
@@ -197,7 +205,19 @@ jobs:
               )
               """
           )
-          summary.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
+          stage_df = summary[
+              [
+                  "ticker",
+                  "status",
+                  "trade_count",
+                  "win_rate",
+                  "total_pnl",
+                  "avg_pnl_per_trade",
+                  "profit_factor",
+                  "max_drawdown",
+              ]
+          ].copy()
+          stage_df.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
           conn.execute("DELETE FROM daily_backtest_runs WHERE run_date = ?", (run_date,))
           conn.execute(
               """
@@ -303,13 +323,34 @@ jobs:
           script: |
             const fs = require("fs");
             const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
-            const createdIssue = await github.rest.issues.create({
+            const title = `Daily Backtest Results - ${process.env.RUN_DATE}`;
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Daily Backtest Results - ${process.env.RUN_DATE}`,
-              body,
-              labels: ["backtest", "daily", "success"]
+              state: "open",
+              labels: "backtest,daily,success",
+              per_page: 100
             });
+            const alreadyOpen = existing.find((issue) => !issue.pull_request && issue.title === title);
+
+            let createdIssue;
+            if (alreadyOpen) {
+              createdIssue = { data: alreadyOpen };
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              createdIssue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["backtest", "daily", "success"]
+              });
+            }
 
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
@@ -350,13 +391,32 @@ jobs:
           script: |
             const fs = require("fs");
             const body = fs.readFileSync(process.env.ISSUE_BODY_FILE, "utf8");
-            await github.rest.issues.create({
+            const title = `⚠️ Daily Backtest FAILED - ${process.env.RUN_DATE}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `⚠️ Daily Backtest FAILED - ${process.env.RUN_DATE}`,
-              body,
-              labels: ["backtest", "daily", "failure"]
+              state: "open",
+              labels: "backtest,daily,failure",
+              per_page: 100
             });
+            const alreadyOpen = issues.find((issue) => !issue.pull_request && issue.title === title);
+
+            if (alreadyOpen) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alreadyOpen.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["backtest", "daily", "failure"]
+              });
+            }
 
       - name: Commit updated SQLite history
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
@@ -364,13 +424,38 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          stashed=false
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git stash push --include-untracked -m "workflow-generated-artifacts"
+            stashed=true
+          fi
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          if [ "$stashed" = "true" ]; then
+            git stash pop
+          fi
+          if compgen -G "data/*.csv" > /dev/null; then
+            git add data/*.csv
+          fi
           git add backtest_results.db
           if git diff --cached --quiet; then
             echo "No database changes to commit."
             exit 0
           fi
-          git commit -m "Update daily backtest history for ${{ steps.schedule.outputs.run_date }}"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          if git diff --cached --name-only | grep -q '^data/'; then
+            commit_message="chore: update ticker prices - $(date +%Y-%m-%d)"
+          else
+            commit_message="Update daily backtest history for ${{ steps.schedule.outputs.run_date }}"
+          fi
+          git commit -m "$commit_message"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:${GITHUB_REF_NAME}; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), rebasing and retrying..."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "Failed to push generated artifacts after retries."
+          exit 1
 
       - name: Fail job when backtest execution fails
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
