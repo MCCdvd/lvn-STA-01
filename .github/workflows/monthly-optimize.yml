@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   monthly-optimization:
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
