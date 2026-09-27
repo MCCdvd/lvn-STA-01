@@ -190,13 +190,18 @@ jobs:
                   )
               )
 
-          conn.execute("DELETE FROM monthly_optimization_runs WHERE run_month = ?", (run_month_key,))
-          conn.execute("DELETE FROM monthly_optimized_params WHERE run_month = ?", (run_month_key,))
           conn.executemany(
               """
               INSERT INTO monthly_optimization_runs
               (run_month, scenario, total_trades, total_pnl, overall_win_rate, profit_factor, max_drawdown, pnl_delta_from_previous_month)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(run_month, scenario) DO UPDATE SET
+                  total_trades = excluded.total_trades,
+                  total_pnl = excluded.total_pnl,
+                  overall_win_rate = excluded.overall_win_rate,
+                  profit_factor = excluded.profit_factor,
+                  max_drawdown = excluded.max_drawdown,
+                  pnl_delta_from_previous_month = excluded.pnl_delta_from_previous_month
               """,
               comparison_rows,
           )
@@ -205,6 +210,15 @@ jobs:
               INSERT INTO monthly_optimized_params
               (run_month, ticker, window_profile, price_tolerance, lvn_threshold, trade_count, total_pnl, overall_win_rate, profit_factor, max_drawdown)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(run_month, ticker) DO UPDATE SET
+                  window_profile = excluded.window_profile,
+                  price_tolerance = excluded.price_tolerance,
+                  lvn_threshold = excluded.lvn_threshold,
+                  trade_count = excluded.trade_count,
+                  total_pnl = excluded.total_pnl,
+                  overall_win_rate = excluded.overall_win_rate,
+                  profit_factor = excluded.profit_factor,
+                  max_drawdown = excluded.max_drawdown
               """,
               [
                   (
