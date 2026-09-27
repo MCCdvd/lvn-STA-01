@@ -468,7 +468,6 @@ jobs:
             exit 0
           fi
           python telegram_notifier.py notify-monthly \
-            --db "$GITHUB_WORKSPACE/backtest_results.db" \
             --success true \
             --run-month "${{ steps.schedule.outputs.run_month_key }}" || echo "Telegram notification failed; continuing."
 

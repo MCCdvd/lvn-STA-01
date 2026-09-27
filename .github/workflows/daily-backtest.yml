@@ -73,6 +73,7 @@ jobs:
         run: |
           set +e
           set -o pipefail
+          start_ts=$(date +%s)
           python - <<'PY' 2>&1 | tee daily_backtest.log
           import os
           import sqlite3
@@ -254,8 +255,11 @@ jobs:
           print(f"Saved daily summary to {summary_path}")
           print(f"Updated SQLite history at {db_path}")
           PY
+          end_ts=$(date +%s)
+          execution_time=$((end_ts - start_ts))
           exit_code=${PIPESTATUS[0]}
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          echo "execution_time=$execution_time" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Prepare daily failure issue body
@@ -395,7 +399,7 @@ jobs:
           python telegram_notifier.py notify-daily \
             --results-file "$RUNNER_TEMP/daily_backtest_summary.csv" \
             --success true \
-            --execution-time 0 || echo "Telegram notification failed; continuing."
+            --execution-time "${{ steps.backtest.outputs.execution_time }}" || echo "Telegram notification failed; continuing."
 
       - name: Create daily failure issue
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
