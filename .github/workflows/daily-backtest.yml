@@ -28,7 +28,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy scipy
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install pandas numpy scipy
+          fi
 
       - name: Run daily backtest
         id: run_backtest
@@ -37,6 +41,7 @@ jobs:
         run: |
           start_ts=$(date +%s)
           python backtest.py --ticker "$BACKTEST_TICKER" > daily_backtest.log 2>&1
+          cp "./database/single_ticker_analysis/single_run/$BACKTEST_TICKER/summary_by_ticker.csv" backtest_results.csv
           end_ts=$(date +%s)
           echo "execution_time=$((end_ts-start_ts))" >> "$GITHUB_OUTPUT"
           echo "ticker=$BACKTEST_TICKER" >> "$GITHUB_OUTPUT"

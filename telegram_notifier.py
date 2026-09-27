@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -74,6 +74,12 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _display_param_value(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "N/A"
+    return str(value)
 
 
 def _compute_profit_factor_from_pnl(pnls: pd.Series) -> float:
@@ -227,9 +233,9 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         if not baseline_params_df.empty:
             row = baseline_params_df.iloc[0]
             old_params = {
-                "window_profile": int(_safe_float(row.get("window_profile"), 0)),
-                "price_tolerance": _safe_float(row.get("price_tolerance"), 0.0),
-                "lvn_threshold": _safe_float(row.get("lvn_threshold"), 0.0),
+                "window_profile": _display_param_value(row.get("window_profile")),
+                "price_tolerance": _display_param_value(row.get("price_tolerance")),
+                "lvn_threshold": _display_param_value(row.get("lvn_threshold")),
             }
 
         params_df = _query_first_success(
@@ -242,9 +248,9 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         if not params_df.empty:
             row = params_df.iloc[0]
             new_params = {
-                "window_profile": int(_safe_float(row.get("window_profile"), 0)),
-                "price_tolerance": _safe_float(row.get("price_tolerance"), 0.0),
-                "lvn_threshold": _safe_float(row.get("lvn_threshold"), 0.0),
+                "window_profile": _display_param_value(row.get("window_profile")),
+                "price_tolerance": _display_param_value(row.get("price_tolerance")),
+                "lvn_threshold": _display_param_value(row.get("lvn_threshold")),
             }
 
         metrics_df = _query_first_success(
@@ -282,8 +288,8 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
     finally:
         conn.close()
 
-    pnl_delta_pct = 0.0
-    if baseline_metrics["total_pnl"]:
+    pnl_delta_pct: Optional[float] = None
+    if baseline_metrics["total_pnl"] != 0:
         pnl_delta_pct = ((optimized_metrics["total_pnl"] - baseline_metrics["total_pnl"]) / abs(baseline_metrics["total_pnl"])) * 100
 
     lines = [
@@ -303,7 +309,11 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         f"└─ lvn_threshold: {new_params['lvn_threshold']}",
         "",
         "📈 <b>Performance Improvement:</b>",
-        f"├─ Total P&L: €{baseline_metrics['total_pnl']:,.2f} → €{optimized_metrics['total_pnl']:,.2f} ({pnl_delta_pct:+.1f}%)",
+        (
+            f"├─ Total P&L: €{baseline_metrics['total_pnl']:,.2f} → €{optimized_metrics['total_pnl']:,.2f} ({pnl_delta_pct:+.1f}%)"
+            if pnl_delta_pct is not None
+            else f"├─ Total P&L: €{baseline_metrics['total_pnl']:,.2f} → €{optimized_metrics['total_pnl']:,.2f} (delta % n/a)"
+        ),
         f"├─ Overall Win Rate: {baseline_metrics['overall_win_rate']:.1f}% → {optimized_metrics['overall_win_rate']:.1f}%",
         f"└─ Profit Factor: {baseline_metrics['profit_factor']:.2f} → {optimized_metrics['profit_factor']:.2f}",
         "",
