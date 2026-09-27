@@ -1,0 +1,78 @@
+name: Monthly Optimization
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+
+jobs:
+  monthly-optimize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install pandas numpy scipy
+          fi
+
+      - name: Run monthly optimization
+        id: run_optimization
+        continue-on-error: true
+        run: |
+          python optimizer.py > monthly_optimization.log 2>&1
+
+      - name: Create monthly success issue
+        id: create_monthly_issue
+        if: steps.run_optimization.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const month = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'Europe/Rome' });
+            const title = `Monthly Optimization Results - ${month}`;
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: 'Monthly optimization completed successfully.',
+              labels: ['optimization', 'monthly', 'success']
+            });
+            core.setOutput('issue_url', issue.data.html_url);
+
+      - name: Send Telegram notification
+        if: steps.run_optimization.outcome == 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MONTHLY_ISSUE_URL: ${{ steps.create_monthly_issue.outputs.issue_url }}
+        run: |
+          python telegram_notifier.py notify-monthly --db backtest_results.db
+
+      - name: Send Telegram failure notification
+        if: steps.run_optimization.outcome != 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          err="$(tail -n 30 monthly_optimization.log 2>/dev/null || echo 'Optimization step failed before log creation')"
+          python telegram_notifier.py notify-monthly \
+            --db backtest_results.db \
+            --status failure \
+            --error "$err"
+
+      - name: Mark workflow failed
+        if: steps.run_optimization.outcome != 'success'
+        run: exit 1
