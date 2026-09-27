@@ -114,13 +114,12 @@ def _download_prices(symbol: str, start_date: str, end_date: str) -> pd.DataFram
 
     result = pd.DataFrame(
         {
-            "Date": pd.to_datetime(data.index).date,
+            "Date": pd.to_datetime(data.index).strftime("%Y-%m-%d"),
             "Close": pd.to_numeric(close, errors="coerce"),
             "Volume": pd.to_numeric(volume, errors="coerce"),
         }
     )
     result = result.dropna(subset=["Date", "Close", "Volume"]).copy()
-    result["Date"] = result["Date"].astype(str)
     return result[["Date", "Close", "Volume"]]
 
 

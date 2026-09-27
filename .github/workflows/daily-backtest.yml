@@ -205,7 +205,19 @@ jobs:
               )
               """
           )
-          summary.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
+          stage_df = summary[
+              [
+                  "ticker",
+                  "status",
+                  "trade_count",
+                  "win_rate",
+                  "total_pnl",
+                  "avg_pnl_per_trade",
+                  "profit_factor",
+                  "max_drawdown",
+              ]
+          ].copy()
+          stage_df.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
           conn.execute("DELETE FROM daily_backtest_runs WHERE run_date = ?", (run_date,))
           conn.execute(
               """
@@ -412,6 +424,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           if compgen -G "data/*.csv" > /dev/null; then
             git add data/*.csv
           fi
@@ -426,7 +439,6 @@ jobs:
             commit_message="Update daily backtest history for ${{ steps.schedule.outputs.run_date }}"
           fi
           git commit -m "$commit_message"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin HEAD:${GITHUB_REF_NAME}
 
       - name: Fail job when backtest execution fails
