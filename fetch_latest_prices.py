@@ -46,6 +46,44 @@ TICKERS: List[str] = [
     "WDI",
 ]
 
+YAHOO_SYMBOLS = {
+    "A2A": "A2A.MI",
+    "AC": "AC.PA",
+    "ADS": "ADS.DE",
+    "AI": "AI.PA",
+    "BAY": "BAYN.DE",
+    "BAYN": "BAYN.DE",
+    "BFF": "BFF.MI",
+    "CAP": "CAP.PA",
+    "CBK": "CBK.DE",
+    "CS": "CS.PA",
+    "DB": "DBK.DE",
+    "DIA": "DIA.MI",
+    "DSY": "DSY.PA",
+    "EOAN": "EOAN.DE",
+    "FTE": "FTE.PA",
+    "G": "G.MI",
+    "GFT": "GFT.DE",
+    "GIL": "GIL.PA",
+    "HAW": "HAW.DE",
+    "HNR1": "HNR1.DE",
+    "MBT": "MBT.MI",
+    "MUV2": "MUV2.DE",
+    "NDA": "NDA-FI.HE",
+    "OBI": "OBI.DE",
+    "OHB": "OHB.DE",
+    "OTHR": "OTHR.DE",
+    "PRO": "PROX.BR",
+    "RSA2": "RSA2.DE",
+    "SAX": "SAX.DE",
+    "SHL": "SHL.DE",
+    "TUI1": "TUI1.DE",
+    "VIG": "VIG.VI",
+    "VOW": "VOW.DE",
+    "VNA": "VNA.DE",
+    "WDI": "WDI.DE",
+}
+
 
 def _extract_series(frame: pd.DataFrame, column: str) -> pd.Series:
     if column in frame.columns:
@@ -111,7 +149,8 @@ def _upsert_ticker(data_dir: Path, ticker: str, today: date) -> Tuple[str, bool]
         return f"last_date={last_date}, today={today} → Skipped", False
 
     start = date(2020, 1, 1) if last_date is None else (last_date + timedelta(days=1))
-    fetched = _download_prices(ticker, start.isoformat(), (today + timedelta(days=1)).isoformat())
+    yahoo_symbol = YAHOO_SYMBOLS.get(ticker, ticker)
+    fetched = _download_prices(yahoo_symbol, start.isoformat(), (today + timedelta(days=1)).isoformat())
 
     if fetched.empty:
         last_repr = "None" if last_date is None else str(last_date)
