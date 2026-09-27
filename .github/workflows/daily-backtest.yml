@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      ticker:
+        description: Optional ticker symbol override
+        required: false
+        type: string
 
 jobs:
   daily-backtest:
@@ -27,11 +32,14 @@ jobs:
 
       - name: Run daily backtest
         id: run_backtest
+        env:
+          BACKTEST_TICKER: ${{ inputs.ticker || vars.DAILY_BACKTEST_TICKER || 'BAYN' }}
         run: |
           start_ts=$(date +%s)
-          python backtest.py --ticker BAYN > daily_backtest.log 2>&1
+          python backtest.py --ticker "$BACKTEST_TICKER" > daily_backtest.log 2>&1
           end_ts=$(date +%s)
           echo "execution_time=$((end_ts-start_ts))" >> "$GITHUB_OUTPUT"
+          echo "ticker=$BACKTEST_TICKER" >> "$GITHUB_OUTPUT"
 
       - name: Create daily success issue
         id: create_daily_issue
@@ -44,7 +52,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title,
-              body: 'Daily backtest completed successfully.',
+              body: `Daily backtest completed successfully for ticker: ${{ steps.run_backtest.outputs.ticker }}`,
               labels: ['backtest', 'daily', 'success']
             });
             core.setOutput('issue_url', issue.data.html_url);

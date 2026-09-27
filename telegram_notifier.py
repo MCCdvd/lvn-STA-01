@@ -60,7 +60,10 @@ def send_telegram_alert(message: str, parse_mode: str = "HTML") -> bool:
 
 def _now_rome() -> datetime:
     if ZoneInfo is not None:
-        return datetime.now(ZoneInfo("Europe/Rome"))
+        try:
+            return datetime.now(ZoneInfo("Europe/Rome"))
+        except Exception:
+            pass
     return datetime.now()
 
 
@@ -205,8 +208,8 @@ def _query_first_success(conn: sqlite3.Connection, queries: list[str]) -> pd.Dat
 
 
 def format_monthly_success_message(db_path: str, run_month: str) -> str:
-    old_params = {"window_profile": 25, "price_tolerance": 0.05, "lvn_threshold": 0.50}
-    new_params = old_params.copy()
+    old_params: dict[str, Any] = {"window_profile": "N/A", "price_tolerance": "N/A", "lvn_threshold": "N/A"}
+    new_params: dict[str, Any] = old_params.copy()
 
     baseline_metrics = {"total_pnl": 0.0, "overall_win_rate": 0.0, "profit_factor": 0.0}
     optimized_metrics = baseline_metrics.copy()
@@ -214,6 +217,21 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
 
     conn = sqlite3.connect(db_path)
     try:
+        baseline_params_df = _query_first_success(
+            conn,
+            [
+                "SELECT window_profile, price_tolerance, lvn_threshold FROM optimization_parameters WHERE lower(coalesce(scenario,'')) LIKE '%baseline%' ORDER BY rowid DESC LIMIT 1",
+                "SELECT window_profile, price_tolerance, lvn_threshold FROM baseline_parameters ORDER BY rowid DESC LIMIT 1",
+            ],
+        )
+        if not baseline_params_df.empty:
+            row = baseline_params_df.iloc[0]
+            old_params = {
+                "window_profile": int(_safe_float(row.get("window_profile"), 0)),
+                "price_tolerance": _safe_float(row.get("price_tolerance"), 0.0),
+                "lvn_threshold": _safe_float(row.get("lvn_threshold"), 0.0),
+            }
+
         params_df = _query_first_success(
             conn,
             [
@@ -224,9 +242,9 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
         if not params_df.empty:
             row = params_df.iloc[0]
             new_params = {
-                "window_profile": int(_safe_float(row.get("window_profile"), old_params["window_profile"])),
-                "price_tolerance": _safe_float(row.get("price_tolerance"), old_params["price_tolerance"]),
-                "lvn_threshold": _safe_float(row.get("lvn_threshold"), old_params["lvn_threshold"]),
+                "window_profile": int(_safe_float(row.get("window_profile"), 0)),
+                "price_tolerance": _safe_float(row.get("price_tolerance"), 0.0),
+                "lvn_threshold": _safe_float(row.get("lvn_threshold"), 0.0),
             }
 
         metrics_df = _query_first_success(
