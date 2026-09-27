@@ -73,6 +73,7 @@ jobs:
         run: |
           set +e
           set -o pipefail
+          start_ts=$(date +%s)
           python - <<'PY' 2>&1 | tee daily_backtest.log
           import os
           import sqlite3
@@ -254,8 +255,11 @@ jobs:
           print(f"Saved daily summary to {summary_path}")
           print(f"Updated SQLite history at {db_path}")
           PY
+          end_ts=$(date +%s)
+          execution_time=$((end_ts - start_ts))
           exit_code=${PIPESTATUS[0]}
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          echo "execution_time=$execution_time" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Prepare daily failure issue body
@@ -381,6 +385,22 @@ jobs:
               }
             }
 
+      - name: Send daily success Telegram notification
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+          python telegram_notifier.py notify-daily \
+            --results-file "$RUNNER_TEMP/daily_backtest_summary.csv" \
+            --success true \
+            --execution-time "${{ steps.backtest.outputs.execution_time }}" || echo "Telegram notification failed; continuing."
+
       - name: Create daily failure issue
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
         uses: actions/github-script@v7
@@ -417,6 +437,19 @@ jobs:
                 labels: ["backtest", "daily", "failure"]
               });
             }
+
+      - name: Send daily failure Telegram notification
+        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+          python telegram_notifier.py notify-daily --success false || echo "Telegram notification failed; continuing."
 
       - name: Commit updated SQLite history
         if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch

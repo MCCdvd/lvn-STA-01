@@ -37,7 +37,7 @@ python fetch_latest_prices.py --data-dir /percorso/al/repo/data
 
 ## Automazione GitHub Actions
 
-La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues** invece che email o Telegram:
+La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues** e, opzionalmente, anche via **Telegram**:
 
 - `Daily Backtest`: esecuzione giornaliera alle 08:00 Europe/Rome
 - `Monthly Optimization`: esecuzione il giorno 1 alle 10:00 Europe/Rome
@@ -58,6 +58,11 @@ La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues*
 
 ### Notifiche
 
-Non servono più secret o variabili email/Telegram (`EMAIL_ADDRESS`, `EMAIL_PASSWORD`, `ALERT_EMAIL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Tutte le notifiche automatiche vengono pubblicate come issue GitHub con link diretto al workflow run in caso di errore.
+Le notifiche automatiche vengono sempre pubblicate come issue GitHub con link diretto al workflow run in caso di errore.
 
-`telegram_notifier.py` resta disponibile solo per invii manuali o integrazioni future, ma i workflow di produzione non dipendono più da credenziali Telegram.
+Le notifiche Telegram sono opzionali: se configuri i secret repository `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`, i workflow inviano anche un messaggio Telegram di successo/failure dopo la creazione della relativa issue. Se i secret non sono presenti (o se Telegram non risponde), il workflow continua normalmente senza bloccare il risultato.
+
+Per attivare Telegram:
+
+1. crea un bot con BotFather e copia il token in `TELEGRAM_BOT_TOKEN`
+2. recupera l'ID della chat/gruppo e impostalo in `TELEGRAM_CHAT_ID`
