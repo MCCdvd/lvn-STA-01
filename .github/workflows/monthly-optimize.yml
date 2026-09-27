@@ -30,12 +30,14 @@ jobs:
           fi
 
       - name: Run monthly optimization
+        id: run_optimization
+        continue-on-error: true
         run: |
           python optimizer.py > monthly_optimization.log 2>&1
 
       - name: Create monthly success issue
         id: create_monthly_issue
-        if: success()
+        if: steps.run_optimization.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -51,7 +53,7 @@ jobs:
             core.setOutput('issue_url', issue.data.html_url);
 
       - name: Send Telegram notification
-        if: success()
+        if: steps.run_optimization.outcome == 'success'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -60,7 +62,7 @@ jobs:
           python telegram_notifier.py notify-monthly --db backtest_results.db
 
       - name: Send Telegram failure notification
-        if: failure()
+        if: steps.run_optimization.outcome != 'success'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -70,3 +72,7 @@ jobs:
             --db backtest_results.db \
             --status failure \
             --error "$err"
+
+      - name: Mark workflow failed
+        if: steps.run_optimization.outcome != 'success'
+        run: exit 1

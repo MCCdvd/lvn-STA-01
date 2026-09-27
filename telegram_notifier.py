@@ -290,7 +290,7 @@ def format_monthly_success_message(db_path: str, run_month: str) -> str:
 
     pnl_delta_pct: Optional[float] = None
     if baseline_metrics["total_pnl"] != 0:
-        pnl_delta_pct = ((optimized_metrics["total_pnl"] - baseline_metrics["total_pnl"]) / abs(baseline_metrics["total_pnl"])) * 100
+        pnl_delta_pct = ((optimized_metrics["total_pnl"] - baseline_metrics["total_pnl"]) / baseline_metrics["total_pnl"]) * 100
 
     lines = [
         "✅ <b>MONTHLY OPTIMIZATION - SUCCESS</b>",
