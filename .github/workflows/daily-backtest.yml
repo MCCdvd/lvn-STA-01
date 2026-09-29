@@ -3,7 +3,7 @@ name: Daily Backtest
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 7,8 * * *"
+    - cron: "0 8 * * *"
 
 permissions:
   contents: write
@@ -28,43 +28,57 @@ jobs:
         id: schedule
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            should_run=true
-          else
-            rome_hour="$(TZ=Europe/Rome date '+%H')"
-            if [ "$rome_hour" = "09" ]; then
-              should_run=true
-            else
-              should_run=false
-            fi
-          fi
-
-          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
           echo "run_date=$(TZ=Europe/Rome date '+%F')" >> "$GITHUB_OUTPUT"
           echo "cutoff_date=$(TZ=Europe/Rome date -d '7 days ago' '+%F')" >> "$GITHUB_OUTPUT"
 
-      - name: Skip duplicate DST slot
-        if: steps.schedule.outputs.should_run != 'true'
-        run: echo "Skipping run because this UTC slot is outside 09:00 Europe/Rome."
+      - name: Check daily run idempotency
+        id: idempotency
+        uses: actions/github-script@v7
+        env:
+          RUN_DATE: ${{ steps.schedule.outputs.run_date }}
+        with:
+          script: |
+            const title = `Daily Backtest Results - ${process.env.RUN_DATE}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "all",
+              labels: "backtest,daily,success",
+              per_page: 100
+            });
+            const alreadySuccessful = issues.some(
+              (issue) => !issue.pull_request && issue.title === title
+            );
+            core.setOutput("should_run", alreadySuccessful ? "false" : "true");
+            core.info(
+              alreadySuccessful
+                ? `Skipping ${process.env.RUN_DATE}; successful result already exists.`
+                : `No successful result exists for ${process.env.RUN_DATE}.`
+            );
+
+      - name: Skip duplicate daily run
+        if: steps.idempotency.outputs.should_run != 'true'
+        run: echo "Skipping because a successful run already exists for this Rome calendar date."
 
       - name: Set up Python
-        if: steps.schedule.outputs.should_run == 'true'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        if: steps.schedule.outputs.should_run == 'true'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install numpy pandas scipy 'yfinance>=0.2.0'
 
       - name: Fetch latest ticker prices
-        if: steps.schedule.outputs.should_run == 'true'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true'
         run: python fetch_latest_prices.py --data-dir ./data
 
       - name: Run daily backtest and persist SQLite history
-        if: steps.schedule.outputs.should_run == 'true'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true'
         id: backtest
         continue-on-error: true
         env:
@@ -263,7 +277,7 @@ jobs:
           exit 0
 
       - name: Prepare daily failure issue body
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
         env:
           RUN_DATE: ${{ steps.schedule.outputs.run_date }}
         shell: bash
@@ -283,7 +297,7 @@ jobs:
           } > "$RUNNER_TEMP/daily_failure_issue.md"
 
       - name: Ensure issue labels exist
-        if: steps.schedule.outputs.should_run == 'true'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -317,7 +331,7 @@ jobs:
             }
 
       - name: Create daily success issue and close stale daily issues
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
         uses: actions/github-script@v7
         env:
           RUN_DATE: ${{ steps.schedule.outputs.run_date }}
@@ -386,7 +400,7 @@ jobs:
             }
 
       - name: Send daily success Telegram notification
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0'
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -402,7 +416,7 @@ jobs:
             --execution-time "${{ steps.backtest.outputs.execution_time }}" || echo "Telegram notification failed; continuing."
 
       - name: Create daily failure issue
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
         uses: actions/github-script@v7
         env:
           RUN_DATE: ${{ steps.schedule.outputs.run_date }}
@@ -439,7 +453,7 @@ jobs:
             }
 
       - name: Send daily failure Telegram notification
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -452,7 +466,7 @@ jobs:
           python telegram_notifier.py notify-daily --success false || echo "Telegram notification failed; continuing."
 
       - name: Commit updated SQLite history
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code == '0' && github.ref_type == 'branch' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -491,5 +505,5 @@ jobs:
           exit 1
 
       - name: Fail job when backtest execution fails
-        if: steps.schedule.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
+        if: steps.schedule.outputs.should_run == 'true' && steps.idempotency.outputs.should_run == 'true' && steps.backtest.outputs.exit_code != '0'
         run: exit 1
