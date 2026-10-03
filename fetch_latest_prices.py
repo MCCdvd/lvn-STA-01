@@ -3,86 +3,12 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
 
-TICKERS: List[str] = [
-    "A2A",
-    "AC",
-    "ADS",
-    "AI",
-    "BAY",
-    "BAYN",
-    "BFF",
-    "CAP",
-    "CBK",
-    "CS",
-    "DB",
-    "DIA",
-    "DSY",
-    "EOAN",
-    "FTE",
-    "G",
-    "GFT",
-    "GIL",
-    "HAW",
-    "HNR1",
-    "MBT",
-    "MUV2",
-    "NDA",
-    "OBI",
-    "OHB",
-    "OTHR",
-    "PRO",
-    "RSA2",
-    "SAX",
-    "SHL",
-    "TUI1",
-    "VIG",
-    "VOW",
-    "VNA",
-    "WDI",
-]
-
-YAHOO_SYMBOLS = {
-    "A2A": "A2A.MI",
-    "AC": "AC.PA",
-    "ADS": "ADS.DE",
-    "AI": "AI.PA",
-    "BAY": "BAYN.DE",
-    "BAYN": "BAYN.DE",
-    "BFF": "BFF.MI",
-    "CAP": "CAP.PA",
-    "CBK": "CBK.DE",
-    "CS": "CS.PA",
-    "DB": "DBK.DE",
-    "DIA": "DIA.MI",
-    "DSY": "DSY.PA",
-    "EOAN": "EOAN.DE",
-    "FTE": "FTE.PA",
-    "G": "G.MI",
-    "GFT": "GFT.DE",
-    "GIL": "GIL.PA",
-    "HAW": "HAW.DE",
-    "HNR1": "HNR1.DE",
-    "MBT": "MBT.MI",
-    "MUV2": "MUV2.DE",
-    "NDA": "NDA-FI.HE",
-    "OBI": "OBI.DE",
-    "OHB": "OHB.DE",
-    "OTHR": "OTHR.DE",
-    "PRO": "PROX.BR",
-    "RSA2": "RSA2.DE",
-    "SAX": "SAX.DE",
-    "SHL": "SHL.DE",
-    "TUI1": "TUI1.DE",
-    "VIG": "VIG.VI",
-    "VOW": "VOW.DE",
-    "VNA": "VNA.DE",
-    "WDI": "WDI.DE",
-}
+from config import TICKERS, YAHOO_SYMBOLS
 
 
 def _extract_series(frame: pd.DataFrame, column: str) -> pd.Series:

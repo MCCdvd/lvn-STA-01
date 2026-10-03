@@ -35,6 +35,46 @@ python optimizer.py --data-dir /percorso/al/repo/data --output-dir /tmp/lvn-opti
 python fetch_latest_prices.py --data-dir /percorso/al/repo/data
 ```
 
+## Universo ticker europeo
+
+`config.py` definisce in `INDEX_TICKERS` tutti i 40 componenti di ciascun indice:
+**MIB40 (FTSE MIB, Italia)**, **DAX40 (Germania)** e **CAC40 (Francia)**.
+`YAHOO_SYMBOLS` associa i codici locali ai simboli Yahoo Finance (`.MI`, `.DE`, `.PA`,
+con `MT.AS` per ArcelorMittal);
+`TICKERS` contiene 140 chiavi senza duplicati e conserva anche i ticker legacy,
+per non perdere serie CSV o parametri ottimizzati esistenti.
+
+Le liste sono snapshot statiche, non una ricostruzione storica dei componenti
+(i backtest possono quindi avere survivorship bias). Fonti consultate il 3 ottobre 2026:
+
+- [FTSE MIB, elenco di base](https://github.com/yfiua/index-constituents/blob/6da4ab7917da2a482d8dce5af701024175e4f6be/docs/constituents-ftsemib.csv), aggiornato con [Technoprobe al posto di DiaSorin dal 21 settembre 2026](https://research.ftserussell.com/products/index-notices/home/getnotice/?id=2621825)
+- [DAX, elenco di base](https://github.com/yfiua/index-constituents/blob/98dd8ec5e1042d27ca4b78e967cc20b73c97e63d/docs/constituents-dax.csv), aggiornato con [Hochtief al posto di Porsche Holding dal 22 giugno 2026](https://stoxx.com/stoxx-announces-scheduled-adjustments-to-dax-blue-chip-indices-jun-3-2026/)
+- [CAC40, elenco machine-readable](https://github.com/GHmysa/portfolio-optimizer/blob/dca67b015164c27d3f0aa1b69e0e71a721d7238f/data_core/data/cac40_tickers.csv) (verifica del manutentore: 19 giugno 2026), confrontato con [Boursier](https://www.boursier.com/indices/composition/cac-40-FR0003500008,FR.html)
+
+Dopo le revisioni degli indici, aggiornare le tuple in `INDEX_TICKERS` e verificare
+i simboli Yahoo e i test. Le quotazioni su borse diverse restano separate:
+`AIR.csv` usa `AIR.PA`, mentre `AIR.DE.csv` usa `AIR.DE`;
+`STLAM`/`STLAP` e `STMMI`/`STM` distinguono Milano da Parigi.
+Il codice locale `STM` usa il simbolo Yahoo `STMPA.PA`.
+Per Volkswagen il DAX usa le azioni privilegiate `VOW3.DE`; il codice legacy
+`VOW` resta disponibile.
+
+Il download senza `--tickers` elabora l'intero universo e crea i CSV mancanti
+dal `2020-01-01` (modificabile con `--bootstrap-start-date`). Un errore su un ticker
+non interrompe gli altri download ed è riportato nel riepilogo; un nuovo ticker
+senza dati disponibili non produce un CSV e non viene analizzato.
+Per selezionare solo alcuni titoli:
+
+```bash
+python fetch_latest_prices.py --data-dir /percorso/al/repo/data --tickers UCG SAP SAN
+```
+
+Entrambi i workflow scaricano questo universo prima dell'analisi: il backtest
+giornaliero e l'ottimizzazione mensile scoprono automaticamente tutti i CSV in
+`data/`, inclusi i nuovi titoli, senza liste aggiuntive da mantenere nei workflow.
+Per i nuovi ticker il giornaliero usa i default finché non sono disponibili
+parametri in `optimized_params.json`.
+
 ## Automazione GitHub Actions
 
 La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues** e, opzionalmente, anche via **Telegram**:
