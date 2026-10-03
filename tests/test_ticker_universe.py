@@ -37,7 +37,8 @@ class TickerUniverseTests(unittest.TestCase):
                 self.assertTrue(set(tickers).issubset(TICKERS))
                 suffix = {"MIB40": ".MI", "DAX40": ".DE", "CAC40": ".PA"}[index]
                 for ticker in tickers:
-                    self.assertTrue(YAHOO_SYMBOLS[ticker].endswith(suffix), ticker)
+                    expected_suffix = ".AS" if ticker == "MT" else suffix
+                    self.assertTrue(YAHOO_SYMBOLS[ticker].endswith(expected_suffix), ticker)
         self.assertEqual(len(TICKERS), len(set(TICKERS)))
         self.assertEqual(set(TICKERS), set(YAHOO_SYMBOLS))
         self.assertIs(fetch_latest_prices.TICKERS, TICKERS)
@@ -50,6 +51,15 @@ class TickerUniverseTests(unittest.TestCase):
         self.assertEqual(YAHOO_SYMBOLS["STMMI"], "STMMI.MI")
         self.assertEqual(YAHOO_SYMBOLS["STM"], "STM.PA")
         self.assertEqual(YAHOO_SYMBOLS["VOW3"], "VOW3.DE")
+        self.assertEqual(YAHOO_SYMBOLS["BC"], "BC.MI")
+        self.assertEqual(YAHOO_SYMBOLS["MT"], "MT.AS")
+        self.assertEqual(YAHOO_SYMBOLS["TPRO"], "TPRO.MI")
+        self.assertEqual(YAHOO_SYMBOLS["HOT"], "HOT.DE")
+        self.assertIn("TPRO", INDEX_TICKERS["MIB40"])
+        self.assertNotIn("DIA", INDEX_TICKERS["MIB40"])
+        self.assertEqual(YAHOO_SYMBOLS["DIA"], "DIA.MI")
+        self.assertIn("HOT", INDEX_TICKERS["DAX40"])
+        self.assertNotIn("PAH3", INDEX_TICKERS["DAX40"])
 
     def test_fetch_defaults_bootstrap_and_incremental_updates(self):
         prices = pd.DataFrame({

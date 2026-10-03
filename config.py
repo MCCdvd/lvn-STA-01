@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_TICKERS = {
     "MIB40": (
         "A2A", "AMP", "AVIO", "AZM", "BMED", "BMPS", "BAMI", "BPE",
-        "BC", "BZU", "CPR", "DIA", "ENEL", "ENI", "RACE", "FCT",
+        "BC", "BZU", "CPR", "TPRO", "ENEL", "ENI", "RACE", "FCT",
         "FBK", "G", "HER", "ISP", "INW", "IG", "IVG", "LDO",
         "LTMC", "MB", "MONC", "NEXI", "PST", "PRY", "REC", "SPM",
         "SRG", "STLAM", "STMMI", "TIT", "TEN", "TRN", "UCG", "UNI",
@@ -19,7 +19,7 @@ INDEX_TICKERS = {
         "ADS", "AIR.DE", "ALV", "BAS", "BAYN", "BEI", "BMW", "BNR",
         "CBK", "CON", "DB1", "DBK", "DHL", "DTE", "DTG", "ENR",
         "EOAN", "FME", "FRE", "G1A", "G24", "HEI", "HEN3", "HNR1",
-        "IFX", "MBG", "MRK", "MTX", "MUV2", "PAH3", "QIA", "RHM",
+        "IFX", "MBG", "MRK", "MTX", "MUV2", "HOT", "QIA", "RHM",
         "RWE", "SAP", "SHL", "SIE", "SY1", "VNA", "VOW3", "ZAL",
     ),
     "CAC40": (
@@ -74,6 +74,9 @@ for index, suffix in (("MIB40", ".MI"), ("DAX40", ".DE"), ("CAC40", ".PA")):
         ticker: ticker if "." in ticker else f"{ticker}{suffix}"
         for ticker in INDEX_TICKERS[index]
     })
+
+# Yahoo serves ArcelorMittal's European listing under Amsterdam, not Paris.
+YAHOO_SYMBOLS["MT"] = "MT.AS"
 
 TICKERS: List[str] = list(YAHOO_SYMBOLS)
 

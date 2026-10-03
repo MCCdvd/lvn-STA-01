@@ -39,15 +39,16 @@ python fetch_latest_prices.py --data-dir /percorso/al/repo/data
 
 `config.py` definisce in `INDEX_TICKERS` tutti i 40 componenti di ciascun indice:
 **MIB40 (FTSE MIB, Italia)**, **DAX40 (Germania)** e **CAC40 (Francia)**.
-`YAHOO_SYMBOLS` associa i codici locali ai simboli Yahoo Finance (`.MI`, `.DE`, `.PA`);
-`TICKERS` contiene 139 chiavi senza duplicati e conserva anche i ticker legacy,
+`YAHOO_SYMBOLS` associa i codici locali ai simboli Yahoo Finance (`.MI`, `.DE`, `.PA`,
+con `MT.AS` per ArcelorMittal);
+`TICKERS` contiene 140 chiavi senza duplicati e conserva anche i ticker legacy,
 per non perdere serie CSV o parametri ottimizzati esistenti.
 
 Le liste sono snapshot statiche, non una ricostruzione storica dei componenti
 (i backtest possono quindi avere survivorship bias). Fonti consultate il 3 ottobre 2026:
 
-- [FTSE MIB, elenco machine-readable](https://github.com/yfiua/index-constituents/blob/6da4ab7917da2a482d8dce5af701024175e4f6be/docs/constituents-ftsemib.csv) (ultima modifica dei componenti: 1 maggio 2026)
-- [DAX, elenco machine-readable](https://github.com/yfiua/index-constituents/blob/98dd8ec5e1042d27ca4b78e967cc20b73c97e63d/docs/constituents-dax.csv) (ultima modifica dei componenti: 1 ottobre 2025)
+- [FTSE MIB, elenco di base](https://github.com/yfiua/index-constituents/blob/6da4ab7917da2a482d8dce5af701024175e4f6be/docs/constituents-ftsemib.csv), aggiornato con [Technoprobe al posto di DiaSorin dal 21 settembre 2026](https://research.ftserussell.com/products/index-notices/home/getnotice/?id=2621825)
+- [DAX, elenco di base](https://github.com/yfiua/index-constituents/blob/98dd8ec5e1042d27ca4b78e967cc20b73c97e63d/docs/constituents-dax.csv), aggiornato con [Hochtief al posto di Porsche Holding dal 22 giugno 2026](https://stoxx.com/stoxx-announces-scheduled-adjustments-to-dax-blue-chip-indices-jun-3-2026/)
 - [CAC40, composizione Boursier](https://www.boursier.com/indices/composition/cac-40-FR0003500008,FR.html)
 
 Dopo le revisioni degli indici, aggiornare le tuple in `INDEX_TICKERS` e verificare
