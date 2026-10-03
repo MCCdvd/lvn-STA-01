@@ -49,12 +49,13 @@ Le liste sono snapshot statiche, non una ricostruzione storica dei componenti
 
 - [FTSE MIB, elenco di base](https://github.com/yfiua/index-constituents/blob/6da4ab7917da2a482d8dce5af701024175e4f6be/docs/constituents-ftsemib.csv), aggiornato con [Technoprobe al posto di DiaSorin dal 21 settembre 2026](https://research.ftserussell.com/products/index-notices/home/getnotice/?id=2621825)
 - [DAX, elenco di base](https://github.com/yfiua/index-constituents/blob/98dd8ec5e1042d27ca4b78e967cc20b73c97e63d/docs/constituents-dax.csv), aggiornato con [Hochtief al posto di Porsche Holding dal 22 giugno 2026](https://stoxx.com/stoxx-announces-scheduled-adjustments-to-dax-blue-chip-indices-jun-3-2026/)
-- [CAC40, composizione Boursier](https://www.boursier.com/indices/composition/cac-40-FR0003500008,FR.html)
+- [CAC40, elenco machine-readable](https://github.com/GHmysa/portfolio-optimizer/blob/dca67b015164c27d3f0aa1b69e0e71a721d7238f/data_core/data/cac40_tickers.csv) (verifica del manutentore: 19 giugno 2026), confrontato con [Boursier](https://www.boursier.com/indices/composition/cac-40-FR0003500008,FR.html)
 
 Dopo le revisioni degli indici, aggiornare le tuple in `INDEX_TICKERS` e verificare
 i simboli Yahoo e i test. Le quotazioni su borse diverse restano separate:
 `AIR.csv` usa `AIR.PA`, mentre `AIR.DE.csv` usa `AIR.DE`;
 `STLAM`/`STLAP` e `STMMI`/`STM` distinguono Milano da Parigi.
+Il codice locale `STM` usa il simbolo Yahoo `STMPA.PA`.
 Per Volkswagen il DAX usa le azioni privilegiate `VOW3.DE`; il codice legacy
 `VOW` resta disponibile.
 

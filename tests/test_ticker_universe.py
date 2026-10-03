@@ -49,7 +49,7 @@ class TickerUniverseTests(unittest.TestCase):
         self.assertEqual(YAHOO_SYMBOLS["STLAM"], "STLAM.MI")
         self.assertEqual(YAHOO_SYMBOLS["STLAP"], "STLAP.PA")
         self.assertEqual(YAHOO_SYMBOLS["STMMI"], "STMMI.MI")
-        self.assertEqual(YAHOO_SYMBOLS["STM"], "STM.PA")
+        self.assertEqual(YAHOO_SYMBOLS["STM"], "STMPA.PA")
         self.assertEqual(YAHOO_SYMBOLS["VOW3"], "VOW3.DE")
         self.assertEqual(YAHOO_SYMBOLS["BC"], "BC.MI")
         self.assertEqual(YAHOO_SYMBOLS["MT"], "MT.AS")

@@ -77,6 +77,7 @@ for index, suffix in (("MIB40", ".MI"), ("DAX40", ".DE"), ("CAC40", ".PA")):
 
 # Yahoo serves ArcelorMittal's European listing under Amsterdam, not Paris.
 YAHOO_SYMBOLS["MT"] = "MT.AS"
+YAHOO_SYMBOLS["STM"] = "STMPA.PA"
 
 TICKERS: List[str] = list(YAHOO_SYMBOLS)
 
