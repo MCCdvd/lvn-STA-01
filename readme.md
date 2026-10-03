@@ -35,6 +35,44 @@ python optimizer.py --data-dir /percorso/al/repo/data --output-dir /tmp/lvn-opti
 python fetch_latest_prices.py --data-dir /percorso/al/repo/data
 ```
 
+## Universo ticker europeo
+
+`config.py` definisce in `INDEX_TICKERS` tutti i 40 componenti di ciascun indice:
+**MIB40 (FTSE MIB, Italia)**, **DAX40 (Germania)** e **CAC40 (Francia)**.
+`YAHOO_SYMBOLS` associa i codici locali ai simboli Yahoo Finance (`.MI`, `.DE`, `.PA`);
+`TICKERS` contiene 139 chiavi senza duplicati e conserva anche i ticker legacy,
+per non perdere serie CSV o parametri ottimizzati esistenti.
+
+Le liste sono snapshot statiche, non una ricostruzione storica dei componenti
+(i backtest possono quindi avere survivorship bias). Fonti consultate il 3 ottobre 2026:
+
+- [FTSE MIB, elenco machine-readable](https://github.com/yfiua/index-constituents/blob/6da4ab7917da2a482d8dce5af701024175e4f6be/docs/constituents-ftsemib.csv) (ultima modifica dei componenti: 1 maggio 2026)
+- [DAX, elenco machine-readable](https://github.com/yfiua/index-constituents/blob/98dd8ec5e1042d27ca4b78e967cc20b73c97e63d/docs/constituents-dax.csv) (ultima modifica dei componenti: 1 ottobre 2025)
+- [CAC40, composizione Boursier](https://www.boursier.com/indices/composition/cac-40-FR0003500008,FR.html)
+
+Dopo le revisioni degli indici, aggiornare le tuple in `INDEX_TICKERS` e verificare
+i simboli Yahoo e i test. Le quotazioni su borse diverse restano separate:
+`AIR.csv` usa `AIR.PA`, mentre `AIR.DE.csv` usa `AIR.DE`;
+`STLAM`/`STLAP` e `STMMI`/`STM` distinguono Milano da Parigi.
+Per Volkswagen il DAX usa le azioni privilegiate `VOW3.DE`; il codice legacy
+`VOW` resta disponibile.
+
+Il download senza `--tickers` elabora l'intero universo e crea i CSV mancanti
+dal `2020-01-01` (modificabile con `--bootstrap-start-date`). Un errore su un ticker
+non interrompe gli altri download ed è riportato nel riepilogo; un nuovo ticker
+senza dati disponibili non produce un CSV e non viene analizzato.
+Per selezionare solo alcuni titoli:
+
+```bash
+python fetch_latest_prices.py --data-dir /percorso/al/repo/data --tickers UCG SAP SAN
+```
+
+Entrambi i workflow scaricano questo universo prima dell'analisi: il backtest
+giornaliero e l'ottimizzazione mensile scoprono automaticamente tutti i CSV in
+`data/`, inclusi i nuovi titoli, senza liste aggiuntive da mantenere nei workflow.
+Per i nuovi ticker il giornaliero usa i default finché non sono disponibili
+parametri in `optimized_params.json`.
+
 ## Automazione GitHub Actions
 
 La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues** e, opzionalmente, anche via **Telegram**:

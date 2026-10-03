@@ -7,6 +7,76 @@ from typing import List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+INDEX_TICKERS = {
+    "MIB40": (
+        "A2A", "AMP", "AVIO", "AZM", "BMED", "BMPS", "BAMI", "BPE",
+        "BC", "BZU", "CPR", "DIA", "ENEL", "ENI", "RACE", "FCT",
+        "FBK", "G", "HER", "ISP", "INW", "IG", "IVG", "LDO",
+        "LTMC", "MB", "MONC", "NEXI", "PST", "PRY", "REC", "SPM",
+        "SRG", "STLAM", "STMMI", "TIT", "TEN", "TRN", "UCG", "UNI",
+    ),
+    "DAX40": (
+        "ADS", "AIR.DE", "ALV", "BAS", "BAYN", "BEI", "BMW", "BNR",
+        "CBK", "CON", "DB1", "DBK", "DHL", "DTE", "DTG", "ENR",
+        "EOAN", "FME", "FRE", "G1A", "G24", "HEI", "HEN3", "HNR1",
+        "IFX", "MBG", "MRK", "MTX", "MUV2", "PAH3", "QIA", "RHM",
+        "RWE", "SAP", "SHL", "SIE", "SY1", "VNA", "VOW3", "ZAL",
+    ),
+    "CAC40": (
+        "AC", "AI", "AIR", "MT", "CS", "BNP", "EN", "BVI",
+        "CAP", "CA", "ACA", "BN", "DSY", "FGR", "ENGI", "EL",
+        "ERF", "ENX", "RMS", "KER", "LR", "OR", "MC", "ML",
+        "ORA", "RI", "PUB", "RNO", "SAF", "SGO", "SAN", "SU",
+        "GLE", "STLAP", "STM", "HO", "TTE", "URW", "VIE", "DG",
+    ),
+}
+
+# Keep legacy ticker keys compatible with existing CSVs and optimized parameters.
+YAHOO_SYMBOLS = {
+    "A2A": "A2A.MI",
+    "AC": "AC.PA",
+    "ADS": "ADS.DE",
+    "AI": "AI.PA",
+    "BAY": "BAYN.DE",
+    "BAYN": "BAYN.DE",
+    "BFF": "BFF.MI",
+    "CAP": "CAP.PA",
+    "CBK": "CBK.DE",
+    "CS": "CS.PA",
+    "DB": "DBK.DE",
+    "DIA": "DIA.MI",
+    "DSY": "DSY.PA",
+    "EOAN": "EOAN.DE",
+    "FTE": "FTE.PA",
+    "G": "G.MI",
+    "GFT": "GFT.DE",
+    "GIL": "GIL.PA",
+    "HAW": "HAW.DE",
+    "HNR1": "HNR1.DE",
+    "MBT": "MBT.MI",
+    "MUV2": "MUV2.DE",
+    "NDA": "NDA-FI.HE",
+    "OBI": "OBI.DE",
+    "OHB": "OHB.DE",
+    "OTHR": "OTHR.DE",
+    "PRO": "PROX.BR",
+    "RSA2": "RSA2.DE",
+    "SAX": "SAX.DE",
+    "SHL": "SHL.DE",
+    "TUI1": "TUI1.DE",
+    "VIG": "VIG.VI",
+    "VOW": "VOW.DE",
+    "VNA": "VNA.DE",
+    "WDI": "WDI.DE",
+}
+for index, suffix in (("MIB40", ".MI"), ("DAX40", ".DE"), ("CAC40", ".PA")):
+    YAHOO_SYMBOLS.update({
+        ticker: ticker if "." in ticker else f"{ticker}{suffix}"
+        for ticker in INDEX_TICKERS[index]
+    })
+
+TICKERS: List[str] = list(YAHOO_SYMBOLS)
+
 
 @dataclass(frozen=True)
 class RuntimeConfig:
