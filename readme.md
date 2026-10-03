@@ -49,6 +49,8 @@ La repository usa due workflow GitHub Actions con notifiche via **GitHub Issues*
 - `optimized_params.json`: ultimo export mensile dei parametri ottimizzati per ticker
 - `data/*.csv`: serie prezzi aggiornate automaticamente da Yahoo Finance
 
+Il backtest giornaliero legge `optimized_params.json` e applica `window_profile`, `price_tolerance` e `lvn_threshold` ottimizzati per ciascun ticker. Se il file manca o il ticker non è presente, usa i default di `config.py`; gli altri parametri restano quelli di configurazione. I tre valori effettivamente usati vengono salvati in `daily_backtest_runs` nello storico SQLite, anche per i ticker senza trade. Le righe storiche precedenti restano invariate, con `NULL` nelle nuove colonne.
+
 ### Dove leggere i risultati
 
 - **Issues** con label `backtest`, `daily`, `success|failure`
