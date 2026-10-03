@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -9,6 +10,22 @@ import pandas as pd
 
 from config import CONFIG
 from engine import StrategyParams, safe_read_csv, signal_for_index
+
+
+def load_optimized_params(file_path: str) -> Dict[str, Dict]:
+    try:
+        with open(file_path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return {}
+
+    return {
+        row["ticker"]: {
+            key: row[key]
+            for key in ("window_profile", "price_tolerance", "lvn_threshold")
+        }
+        for row in payload["tickers"]
+    }
 
 
 @dataclass

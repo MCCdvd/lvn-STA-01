@@ -91,11 +91,12 @@ jobs:
           python - <<'PY' 2>&1 | tee daily_backtest.log
           import os
           import sqlite3
+          from dataclasses import replace
           from pathlib import Path
 
           import pandas as pd
 
-          from backtest import build_summaries, run_backtest_for_ticker
+          from backtest import build_summaries, load_optimized_params, run_backtest_for_ticker
           from config import CONFIG
           from engine import StrategyParams
 
@@ -110,7 +111,8 @@ jobs:
           if not tickers:
               raise ValueError("No ticker CSV files found in ./data or repository root")
 
-          params = StrategyParams(
+          optimized_params = load_optimized_params(str(repo / "optimized_params.json"))
+          default_params = StrategyParams(
               window_profile=CONFIG.strategy.window_profile,
               price_tolerance=CONFIG.strategy.price_tolerance,
               lvn_threshold=CONFIG.strategy.lvn_threshold,
@@ -123,6 +125,12 @@ jobs:
 
           rows = []
           for ticker in tickers:
+              params = replace(default_params, **optimized_params.get(ticker, {}))
+              used_params = {
+                  "window_profile": params.window_profile,
+                  "price_tolerance": params.price_tolerance,
+                  "lvn_threshold": params.lvn_threshold,
+              }
               trades = run_backtest_for_ticker(
                   data_dir=str(data_dir),
                   ticker=ticker,
@@ -134,6 +142,7 @@ jobs:
               if trades.empty:
                   rows.append(
                       {
+                          **used_params,
                           "ticker": ticker,
                           "status": "no trades",
                           "win_count": 0,
@@ -154,6 +163,7 @@ jobs:
               status = "profit" if total_pnl > 0 else "loss" if total_pnl < 0 else "flat"
               rows.append(
                   {
+                      **used_params,
                       "ticker": ticker,
                       "status": status,
                       "win_count": win_count,
@@ -203,11 +213,22 @@ jobs:
                   avg_pnl_per_trade REAL NOT NULL,
                   profit_factor REAL NOT NULL,
                   max_drawdown REAL NOT NULL,
+                  window_profile INTEGER,
+                  price_tolerance REAL,
+                  lvn_threshold REAL,
                   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   PRIMARY KEY (run_date, ticker)
               )
               """
           )
+          existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(daily_backtest_runs)")}
+          for column, sql_type in (
+              ("window_profile", "INTEGER"),
+              ("price_tolerance", "REAL"),
+              ("lvn_threshold", "REAL"),
+          ):
+              if column not in existing_columns:
+                  conn.execute(f"ALTER TABLE daily_backtest_runs ADD COLUMN {column} {sql_type}")
           conn.execute(
               """
               CREATE TABLE IF NOT EXISTS daily_backtest_totals (
@@ -230,6 +251,9 @@ jobs:
                   "avg_pnl_per_trade",
                   "profit_factor",
                   "max_drawdown",
+                  "window_profile",
+                  "price_tolerance",
+                  "lvn_threshold",
               ]
           ].copy()
           stage_df.to_sql("daily_backtest_runs_stage", conn, if_exists="replace", index=False)
@@ -237,8 +261,10 @@ jobs:
           conn.execute(
               """
               INSERT INTO daily_backtest_runs
-              (run_date, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown)
-              SELECT ?, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown
+              (run_date, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown,
+               window_profile, price_tolerance, lvn_threshold)
+              SELECT ?, ticker, status, trade_count, win_rate, total_pnl, avg_pnl_per_trade, profit_factor, max_drawdown,
+                     window_profile, price_tolerance, lvn_threshold
               FROM daily_backtest_runs_stage
               """,
               (run_date,),
