@@ -3,14 +3,16 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
+import time
 from dataclasses import asdict
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from backtest import build_summaries, run_backtest_for_ticker
+from backtest import _max_drawdown, build_summaries, run_backtest_for_ticker
 from config import CONFIG
 from engine import StrategyParams
+from progress import ProgressDisplay, RunMetrics
 
 
 def _parse_int_list(raw: str) -> List[int]:
@@ -27,9 +29,16 @@ def _discover_tickers(data_dir: str) -> List[str]:
     return sorted([f.replace(".csv", "") for f in os.listdir(data_dir) if f.endswith(".csv") and f != "failed_tickers.csv"])
 
 
-def _run_global_with_shared_params(data_dir: str, tickers: List[str], params: StrategyParams) -> pd.DataFrame:
+def _run_global_with_shared_params(
+    data_dir: str,
+    tickers: List[str],
+    params: StrategyParams,
+    progress_display: Optional[ProgressDisplay] = None,
+    processed_units: int = 0,
+) -> Tuple[pd.DataFrame, int]:
     all_trades: List[pd.DataFrame] = []
     for ticker in tickers:
+        run_metadata: Dict[str, bool] = {}
         trades = run_backtest_for_ticker(
             data_dir=data_dir,
             ticker=ticker,
@@ -37,12 +46,27 @@ def _run_global_with_shared_params(data_dir: str, tickers: List[str], params: St
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
+        processed_units += 1
+        if progress_display is not None:
+            baseline_metrics = _progress_metrics_for_trades(trades)
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
+            else:
+                progress_display.record_ticker_result(ticker, baseline_metrics.trades_found, baseline_metrics.total_pnl)
+            progress_display.update(
+                processed_units=processed_units,
+                current_ticker=ticker,
+                metrics=baseline_metrics,
+                context="Baseline shared parameters",
+            )
         if not trades.empty:
             all_trades.append(trades)
     if not all_trades:
-        return pd.DataFrame(columns=["ticker", "direction", "entry_date", "exit_date", "entry_price", "exit_price", "quantity", "realized_pnl", "return_pct", "exit_reason"])
-    return pd.concat(all_trades, ignore_index=True)
+        empty = pd.DataFrame(columns=["ticker", "direction", "entry_date", "exit_date", "entry_price", "exit_price", "quantity", "realized_pnl", "return_pct", "exit_reason"])
+        return empty, processed_units
+    return pd.concat(all_trades, ignore_index=True), processed_units
 
 
 def _save_baseline(output_dir: str, params: StrategyParams, trades_df: pd.DataFrame) -> pd.DataFrame:
@@ -56,7 +80,40 @@ def _save_baseline(output_dir: str, params: StrategyParams, trades_df: pd.DataFr
     return summary_global_df
 
 
-def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.DataFrame:
+def _progress_metrics_for_trades(trades_df: pd.DataFrame) -> RunMetrics:
+    trade_count = int(len(trades_df))
+    if trades_df.empty:
+        return RunMetrics()
+    total_pnl = float(trades_df["realized_pnl"].sum())
+    win_rate = float((trades_df["realized_pnl"] > 0).sum() / trade_count) * 100 if trade_count else 0.0
+    return RunMetrics(
+        trades_found=trade_count,
+        total_pnl=total_pnl,
+        win_rate=win_rate,
+        max_drawdown=_max_drawdown(trades_df),
+    )
+
+
+def _summary_row_for_trades(trades_df: pd.DataFrame) -> Dict[str, float]:
+    _, summary_global_df = build_summaries(trades_df)
+    if summary_global_df.empty:
+        return {
+            "total_trades": 0.0,
+            "total_pnl": 0.0,
+            "overall_win_rate": 0.0,
+            "profit_factor": 0.0,
+            "max_drawdown": 0.0,
+        }
+    return summary_global_df.iloc[0].to_dict()
+
+
+def _score_ticker_combos(
+    data_dir: str,
+    ticker: str,
+    combos: List[tuple],
+    progress_display: Optional[ProgressDisplay] = None,
+    processed_units: int = 0,
+) -> Tuple[pd.DataFrame, int]:
     rows: List[Dict] = []
     for window_profile, price_tolerance, lvn_threshold in combos:
         params = StrategyParams(
@@ -69,6 +126,7 @@ def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.
             rsi_long_max=CONFIG.strategy.rsi_long_max,
             rsi_short_min=CONFIG.strategy.rsi_short_min,
         )
+        run_metadata: Dict[str, bool] = {}
         trades_df = run_backtest_for_ticker(
             data_dir=data_dir,
             ticker=ticker,
@@ -76,9 +134,9 @@ def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
-        _, summary_global_df = build_summaries(trades_df)
-        metrics = summary_global_df.iloc[0].to_dict()
+        metrics = _summary_row_for_trades(trades_df)
         metrics.update(
             {
                 "ticker": ticker,
@@ -89,7 +147,24 @@ def _score_ticker_combos(data_dir: str, ticker: str, combos: List[tuple]) -> pd.
             }
         )
         rows.append(metrics)
-    return pd.DataFrame(rows)
+        processed_units += 1
+        if progress_display is not None:
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
+            else:
+                progress_display.record_ticker_result(ticker, int(metrics["trade_count"]), float(metrics["total_pnl"]))
+            progress_display.update(
+                processed_units=processed_units,
+                current_ticker=ticker,
+                metrics=RunMetrics(
+                    trades_found=int(len(trades_df)),
+                    total_pnl=float(metrics["total_pnl"]),
+                    win_rate=float(metrics["overall_win_rate"]),
+                    max_drawdown=float(metrics["max_drawdown"]),
+                ),
+                context=f"Grid search (window={window_profile}, tolerance={price_tolerance}, lvn={lvn_threshold})",
+            )
+    return pd.DataFrame(rows), processed_units
 
 
 def main() -> None:
@@ -118,6 +193,18 @@ def main() -> None:
     if not combos:
         raise ValueError("Nessuna combinazione parametri disponibile")
 
+    total_progress_units = len(tickers) + (len(tickers) * len(combos)) + len(tickers)
+    progress_display = ProgressDisplay(
+        title="LVN Trading Strategy - Optimization Progress",
+        total_units=total_progress_units,
+        unit_label="runs",
+        update_interval_seconds=CONFIG.progress.update_interval_seconds,
+        bar_width=CONFIG.progress.bar_width,
+        enabled=CONFIG.progress.enabled,
+    )
+    processed_units = 0
+    started_at = time.monotonic()
+
     baseline_params = StrategyParams(
         window_profile=CONFIG.strategy.window_profile,
         price_tolerance=CONFIG.strategy.price_tolerance,
@@ -128,7 +215,13 @@ def main() -> None:
         rsi_long_max=CONFIG.strategy.rsi_long_max,
         rsi_short_min=CONFIG.strategy.rsi_short_min,
     )
-    baseline_trades = _run_global_with_shared_params(args.data_dir, tickers, baseline_params)
+    baseline_trades, processed_units = _run_global_with_shared_params(
+        args.data_dir,
+        tickers,
+        baseline_params,
+        progress_display=progress_display,
+        processed_units=processed_units,
+    )
     baseline_global_df = _save_baseline(args.output_dir, baseline_params, baseline_trades)
 
     per_ticker_root = os.path.join(args.output_dir, "per_ticker")
@@ -138,7 +231,13 @@ def main() -> None:
     best_trades_frames: List[pd.DataFrame] = []
 
     for ticker in tickers:
-        ticker_results = _score_ticker_combos(args.data_dir, ticker, combos)
+        ticker_results, processed_units = _score_ticker_combos(
+            args.data_dir,
+            ticker,
+            combos,
+            progress_display=progress_display,
+            processed_units=processed_units,
+        )
         ticker_results = ticker_results.sort_values(
             by=["profit_factor", "total_pnl", "max_drawdown", "trade_count"],
             ascending=[False, False, True, False],
@@ -163,6 +262,7 @@ def main() -> None:
             rsi_long_max=CONFIG.strategy.rsi_long_max,
             rsi_short_min=CONFIG.strategy.rsi_short_min,
         )
+        run_metadata: Dict[str, bool] = {}
         best_trades = run_backtest_for_ticker(
             data_dir=args.data_dir,
             ticker=ticker,
@@ -170,7 +270,27 @@ def main() -> None:
             investimento_per_trade=CONFIG.strategy.investimento_per_trade,
             commissione_apertura=CONFIG.strategy.commissione_apertura,
             commissione_chiusura=CONFIG.strategy.commissione_chiusura,
+            run_metadata=run_metadata,
         )
+        processed_units += 1
+        best_summary_row = _summary_row_for_trades(best_trades)
+        if progress_display is not None:
+            if run_metadata.get("skipped"):
+                progress_display.record_skipped_ticker(ticker)
+            else:
+                progress_display.record_ticker_result(ticker, int(best_summary_row["total_trades"]), float(best_summary_row["total_pnl"]))
+            progress_display.update(
+                processed_units=processed_units,
+                current_ticker=ticker,
+                metrics=RunMetrics(
+                    trades_found=int(len(best_trades)),
+                    total_pnl=float(best_summary_row["total_pnl"]),
+                    win_rate=float(best_summary_row["overall_win_rate"]),
+                    max_drawdown=float(best_summary_row["max_drawdown"]),
+                ),
+                context="Best parameters validation",
+                force=processed_units == total_progress_units,
+            )
         if not best_trades.empty:
             best_trades_frames.append(best_trades)
 
@@ -219,7 +339,11 @@ def main() -> None:
         ]
     )
     comparison.to_csv(os.path.join(args.output_dir, "comparison_baseline_vs_per_ticker.csv"), index=False)
-    print(f"Ottimizzazione completata. Output: {args.output_dir}")
+    progress_display.print_summary(total_time_seconds=time.monotonic() - started_at)
+    try:
+        print(f"Ottimizzazione completata. Output: {args.output_dir}")
+    except BrokenPipeError:
+        return
 
 
 if __name__ == "__main__":
