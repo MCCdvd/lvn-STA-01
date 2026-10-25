@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -120,7 +120,19 @@ def _update_position(position: PositionState, df: pd.DataFrame, idx: int, date_s
     return None
 
 
-def run_backtest_for_ticker(data_dir: str, ticker: str, params: StrategyParams, investimento_per_trade: float, commissione_apertura: float, commissione_chiusura: float) -> pd.DataFrame:
+def run_backtest_for_ticker(
+    data_dir: str,
+    ticker: str,
+    params: StrategyParams,
+    investimento_per_trade: float,
+    commissione_apertura: float,
+    commissione_chiusura: float,
+    *,
+    progress_display: Optional[Any] = None,
+    progress_update_interval: Optional[float] = None,
+    enable_progress: Optional[bool] = None,
+) -> pd.DataFrame:
+    _ = (progress_display, progress_update_interval, enable_progress)
     file_path = os.path.join(data_dir, f"{ticker}.csv")
     df = safe_read_csv(file_path)
     if df is None or len(df) < params.window_profile + 1:
